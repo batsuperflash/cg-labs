@@ -1,10 +1,60 @@
 #include "ui.hpp"
 
+#include <cstdio>
+
 #include <imgui.h>
 
 namespace ui {
 
 namespace {
+
+void drawObjectsSection(scene::Scene& scene) {
+	if (!ImGui::CollapsingHeader("Objects", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	// Выпадающий список занимает одну строку, поэтому окно не растёт с числом объектов.
+	auto drawSwatch = [](const glm::vec3& color) {
+		const float size = ImGui::GetFrameHeight();
+		ImGui::ColorButton("##swatch", ImVec4(color.r, color.g, color.b, 1.0f), ImGuiColorEditFlags_NoTooltip,
+		                   ImVec2(size, size));
+		ImGui::SameLine();
+	};
+
+	char preview[32];
+	std::snprintf(preview, sizeof(preview), "Object %d", scene.selected + 1);
+	drawSwatch(scene.objects[scene.selected].color);
+	if (ImGui::BeginCombo("Selected", preview)) {
+		for (int i = 0; i < scene.object_count; ++i) {
+			char label[32];
+			std::snprintf(label, sizeof(label), "Object %d", i + 1);
+
+			ImGui::PushID(i);
+			drawSwatch(scene.objects[i].color);
+			if (ImGui::Selectable(label, scene.selected == i)) {
+				scene.selected = i;
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndCombo();
+	}
+
+	ImGui::BeginDisabled(scene.object_count >= scene::max_objects);
+	if (ImGui::Button("Add")) {
+		scene::addObject(scene);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SameLine();
+	ImGui::BeginDisabled(scene.object_count <= 1);
+	if (ImGui::Button("Remove")) {
+		scene::removeSelected(scene);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SameLine();
+	ImGui::TextDisabled("%d of %d, one descriptor set each", scene.object_count, scene::max_objects);
+}
 
 void drawCameraSection(scene::Camera& camera) {
 	if (!ImGui::CollapsingHeader("Camera & projection", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -91,6 +141,12 @@ void drawSceneWindow(scene::Scene& scene) {
 
 	ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
 	drawCameraSection(scene.camera);
+	drawObjectsSection(scene);
+
+	// Разделы ниже меняют только выбранный объект.
+	char title[32];
+	std::snprintf(title, sizeof(title), "Object %d", scene.selected + 1);
+	ImGui::SeparatorText(title);
 
 	scene::Object& object = scene.objects[scene.selected];
 	drawTransformSection(object.transform);
