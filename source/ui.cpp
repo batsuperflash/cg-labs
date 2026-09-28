@@ -31,6 +31,22 @@ void drawCameraSection(scene::Camera& camera) {
 	}
 }
 
+void drawTransformSection(scene::Transform& transform) {
+	if (!ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	// Отрицательный масштаб запрещён: он выворачивает треугольники, и отсечение задних граней скрыло бы лицевые.
+	ImGui::DragFloat3("Position", &transform.position.x, 0.01f, -5.0f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+	ImGui::DragFloat3("Rotation", &transform.rotation_degrees.x, 0.5f, -180.0f, 180.0f, "%.0f deg",
+	                  ImGuiSliderFlags_AlwaysClamp);
+	ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f, 0.05f, 5.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+
+	if (ImGui::Button("Reset transform")) {
+		transform = {};
+	}
+}
+
 } // namespace
 
 void drawSceneWindow(scene::Scene& scene) {
@@ -40,6 +56,9 @@ void drawSceneWindow(scene::Scene& scene) {
 
 	ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
 	drawCameraSection(scene.camera);
+
+	scene::Object& object = scene.objects[scene.selected];
+	drawTransformSection(object.transform);
 
 	ImGui::PopItemWidth();
 	ImGui::End();
