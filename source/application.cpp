@@ -14,7 +14,6 @@
 
 #include <imgui.h>
 
-#include "color.hpp"
 #include "geometry.hpp"
 #include "graphics.hpp"
 #include "scene.hpp"
@@ -283,7 +282,9 @@ void render(const graphics::internal::FrameData& fd) {
 			.model = scene::modelMatrix(object),
 			.view = view,
 			.proj = proj,
-			.color = glm::vec4(color::srgbToLinear(object.color), 1.0f),
+			// Цвет из ColorEdit передаётся как есть: ImGui рисует свой образец в тот же sRGB-swapchain
+			// без перевода, и только так фигура совпадает с образцом на экране.
+			.color = glm::vec4(object.color, 1.0f),
 			.flags = glm::uvec4(object.vertex_colors ? 1u : 0u, 0u, 0u, 0u),
 		};
 		graphics::writeBuffer(objects_gpu[i].uniforms, &uniforms, sizeof(uniforms));

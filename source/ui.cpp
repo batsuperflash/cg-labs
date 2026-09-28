@@ -72,6 +72,16 @@ void drawAnimationSection(scene::Animation& animation) {
 	ImGui::TextDisabled("p(t) = R (sin(a t + shift), sin(b t), sin(c t))");
 }
 
+void drawColorSection(scene::Object& object) {
+	if (!ImGui::CollapsingHeader("Color", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	ImGui::ColorEdit3("Color", &object.color.x);
+	ImGui::Checkbox("Vertex colors", &object.vertex_colors);
+	ImGui::TextDisabled(object.vertex_colors ? "Result = vertex color * color" : "Result = color");
+}
+
 } // namespace
 
 void drawSceneWindow(scene::Scene& scene) {
@@ -85,6 +95,7 @@ void drawSceneWindow(scene::Scene& scene) {
 	scene::Object& object = scene.objects[scene.selected];
 	drawTransformSection(object.transform);
 	drawAnimationSection(object.animation);
+	drawColorSection(object);
 
 	ImGui::PopItemWidth();
 	ImGui::End();

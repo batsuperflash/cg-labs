@@ -106,6 +106,12 @@ void testDodecahedron() {
 
 	for (const geometry::Vertex& vertex : mesh.vertices) {
 		check(std::abs(glm::length(vertex.position) - 1.0f) < 1e-5f, "vertex lies on the unit sphere");
+
+		const glm::vec3 expected_color = color::srgbToLinear(vertex.position * 0.5f + 0.5f);
+		check(approxEqual(vertex.color, expected_color) &&
+		      glm::all(glm::greaterThanEqual(vertex.color, glm::vec3(0.0f))) &&
+		      glm::all(glm::lessThanEqual(vertex.color, glm::vec3(1.0f))),
+		      "vertex color is position * 0.5 + 0.5 converted from sRGB");
 	}
 
 	std::map<std::pair<uint16_t, uint16_t>, int> directed_edges;

@@ -47,7 +47,7 @@ struct Animation {
 struct Object {
 	Transform transform;
 	Animation animation;
-	glm::vec3 color = glm::vec3(1.0f); // в sRGB, как в ColorEdit
+	glm::vec3 color = glm::vec3(1.0f); // как в ColorEdit, передаётся в шейдер без перевода
 	bool vertex_colors = true;
 };
 

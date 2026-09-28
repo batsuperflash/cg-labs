@@ -4,6 +4,8 @@
 #include <cmath>
 #include <numbers>
 
+#include "color.hpp"
+
 namespace geometry {
 
 Mesh makeDodecahedron() {
@@ -41,7 +43,7 @@ Mesh makeDodecahedron() {
 	Mesh mesh;
 	for (const glm::vec3& p : positions) {
 		const glm::vec3 position = p / std::sqrt(3.0f);
-		mesh.vertices.push_back({ position, position * 0.5f + 0.5f });
+		mesh.vertices.push_back({ position, color::srgbToLinear(position * 0.5f + 0.5f) });
 	}
 
 	for (const glm::vec3& normal : normals) {
