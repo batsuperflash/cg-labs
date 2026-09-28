@@ -14,9 +14,11 @@
 
 #include <imgui.h>
 
+#include "color.hpp"
 #include "geometry.hpp"
 #include "graphics.hpp"
-#include "transform.hpp"
+#include "scene.hpp"
+#include "ui.hpp"
 
 namespace application {
 
@@ -41,14 +43,7 @@ struct ObjectGpu {
 	VkDescriptorSet descriptor_set;
 };
 
-constexpr uint32_t max_objects = 8;
-
-struct Camera {
-	float distance = 4.0f;
-	float fov_degrees = 60.0f;
-	float z_near = 0.1f;
-	float z_far = 100.0f;
-};
+constexpr uint32_t max_objects = scene::max_objects;
 
 graphics::Buffer vertex_buffer;
 graphics::Buffer index_buffer;
@@ -60,11 +55,8 @@ VkPipeline vk_pipeline;
 VkDescriptorPool vk_descriptor_pool;
 
 std::array<ObjectGpu, max_objects> objects_gpu;
-uint32_t object_count = 1;
 
-Camera camera;
-float spin_speed = 0.6f;
-float spin_angle = 0.0f;
+scene::Scene world;
 double previous_time = -1.0;
 
 // Если задана переменная окружения LAB_EXIT_AFTER_FRAMES, программа закрывается сама
@@ -260,18 +252,11 @@ void update(double time) {
 	const float dt = previous_time < 0.0 ? 0.0f : float(std::min(time - previous_time, 0.1));
 	previous_time = time;
 
-	spin_angle += spin_speed * dt;
+	for (int i = 0; i < world.object_count; ++i) {
+		scene::advance(world.objects[i].animation, dt);
+	}
 
-	ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize(ImVec2(360.0f, 0.0f), ImGuiCond_FirstUseEver);
-	ImGui::Begin("Lab 1: regular dodecahedron");
-
-	ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
-	ImGui::SliderFloat("Spin speed", &spin_speed, -3.0f, 3.0f, "%.2f rad/s");
-	ImGui::SliderFloat("Camera distance", &camera.distance, 2.0f, 10.0f, "%.1f");
-	ImGui::SliderFloat("Field of view", &camera.fov_degrees, 20.0f, 120.0f, "%.0f deg");
-
-	ImGui::End();
+	ui::drawSceneWindow(world);
 
 	if (exit_after_frames != 0 && ++frame_count >= exit_after_frames) {
 		auto* window = static_cast<GLFWwindow*>(ImGui::GetMainViewport()->PlatformHandle);
@@ -288,17 +273,21 @@ void render(const graphics::internal::FrameData& fd) {
 	const VkExtent2D extent = context.swapchain_extent;
 	const float aspect = float(extent.width) / float(std::max(extent.height, 1u));
 
-	// prepare() уже дождался завершения предыдущего кадра, поэтому uniform buffer можно перезаписать.
-	const ObjectUniforms uniforms = {
-		.model = transform::rotateY(spin_angle) * transform::rotateX(0.5f * spin_angle),
-		.view = transform::lookAt(glm::vec3(0.0f, 0.0f, camera.distance), glm::vec3(0.0f),
-		                          glm::vec3(0.0f, 1.0f, 0.0f)),
-		.proj = transform::perspective(glm::radians(camera.fov_degrees), aspect,
-		                               camera.z_near, camera.z_far),
-		.color = glm::vec4(1.0f),
-		.flags = glm::uvec4(1, 0, 0, 0),
-	};
-	graphics::writeBuffer(objects_gpu[0].uniforms, &uniforms, sizeof(uniforms));
+	const glm::mat4 view = scene::viewMatrix(world.camera);
+	const glm::mat4 proj = scene::projectionMatrix(world.camera, aspect);
+
+	// prepare() уже дождался завершения предыдущего кадра, поэтому uniform buffers можно перезаписать.
+	for (int i = 0; i < world.object_count; ++i) {
+		const scene::Object& object = world.objects[i];
+		const ObjectUniforms uniforms = {
+			.model = scene::modelMatrix(object),
+			.view = view,
+			.proj = proj,
+			.color = glm::vec4(color::srgbToLinear(object.color), 1.0f),
+			.flags = glm::uvec4(object.vertex_colors ? 1u : 0u, 0u, 0u, 0u),
+		};
+		graphics::writeBuffer(objects_gpu[i].uniforms, &uniforms, sizeof(uniforms));
+	}
 
 	const VkCommandBufferBeginInfo command_buffer_begin = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -341,7 +330,8 @@ void render(const graphics::internal::FrameData& fd) {
 	vkCmdBindVertexBuffers(fd.command_buffer, 0, 1, &vertex_buffer.buffer, &vertex_offset);
 	vkCmdBindIndexBuffer(fd.command_buffer, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT16);
 
-	for (uint32_t i = 0; i < object_count; ++i) {
+	// Каждый объект рисуется со своим descriptor set, то есть со своим uniform buffer.
+	for (int i = 0; i < world.object_count; ++i) {
 		vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline_layout,
 		                        0, 1, &objects_gpu[i].descriptor_set, 0, nullptr);
 		vkCmdDrawIndexed(fd.command_buffer, index_count, 1, 0, 0, 0);

@@ -129,6 +129,7 @@ target_sources(${PROJECT_NAME} PRIVATE
 	source/geometry.cpp
 	source/scene.cpp
 	source/transform.cpp
+	source/ui.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)

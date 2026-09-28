@@ -15,7 +15,7 @@ enum class Projection {
 
 struct Camera {
 	Projection projection = Projection::Perspective;
-	float distance = 7.0f;     // камера в (0, 0, distance) смотрит в начало координат
+	float distance = 8.0f;     // камера в (0, 0, distance) смотрит в начало координат
 	float fov_degrees = 60.0f; // в ортографической проекции задаёт высоту видимого объёма
 	float z_near = 0.1f;
 	float z_far = 100.0f;

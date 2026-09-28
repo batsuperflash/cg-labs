@@ -1,0 +1,48 @@
+#include "ui.hpp"
+
+#include <imgui.h>
+
+namespace ui {
+
+namespace {
+
+void drawCameraSection(scene::Camera& camera) {
+	if (!ImGui::CollapsingHeader("Camera & projection", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	if (ImGui::RadioButton("Perspective", camera.projection == scene::Projection::Perspective)) {
+		camera.projection = scene::Projection::Perspective;
+	}
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Orthographic", camera.projection == scene::Projection::Orthographic)) {
+		camera.projection = scene::Projection::Orthographic;
+	}
+
+	ImGui::SliderFloat("Field of view", &camera.fov_degrees, 20.0f, 120.0f, "%.0f deg");
+	ImGui::SliderFloat("Camera distance", &camera.distance, 3.0f, 15.0f, "%.1f");
+	ImGui::DragFloat("Near plane", &camera.z_near, 0.01f, 0.01f, camera.z_far - 0.01f, "%.2f",
+	                 ImGuiSliderFlags_AlwaysClamp);
+	ImGui::DragFloat("Far plane", &camera.z_far, 0.5f, camera.z_near + 0.01f, 500.0f, "%.1f",
+	                 ImGuiSliderFlags_AlwaysClamp);
+
+	if (camera.projection == scene::Projection::Orthographic) {
+		ImGui::TextDisabled("View height = 2 * distance * tan(FOV / 2)");
+	}
+}
+
+} // namespace
+
+void drawSceneWindow(scene::Scene& scene) {
+	ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
+	ImGui::Begin("Lab 1: regular dodecahedron", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+	ImGui::PushItemWidth(220.0f);
+
+	ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
+	drawCameraSection(scene.camera);
+
+	ImGui::PopItemWidth();
+	ImGui::End();
+}
+
+} // namespace ui
