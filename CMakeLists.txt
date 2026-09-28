@@ -127,13 +127,14 @@ FetchContent_MakeAvailable(glm)
 target_sources(${PROJECT_NAME} PRIVATE
 	source/graphics.cpp
 	source/geometry.cpp
+	source/scene.cpp
 	source/transform.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
 
-# Tests for matrices and geometry: no window and no Vulkan required
-add_executable(lab_tests tests/lab_tests.cpp source/geometry.cpp source/transform.cpp)
+# Tests for matrices, geometry and scene logic: no window and no Vulkan required
+add_executable(lab_tests tests/lab_tests.cpp source/geometry.cpp source/scene.cpp source/transform.cpp)
 set_target_properties(lab_tests PROPERTIES CXX_STANDARD_REQUIRED TRUE CXX_STANDARD 20)
 target_include_directories(lab_tests PRIVATE source)
 target_link_libraries(lab_tests PRIVATE glm::glm)

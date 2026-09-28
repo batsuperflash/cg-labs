@@ -1,4 +1,5 @@
-// Проверки без окна и без Vulkan: матрицы сравниваются с GLM, геометрия — с известными свойствами додекаэдра.
+// Проверки без окна и без Vulkan: матрицы сравниваются с GLM, геометрия — с известными свойствами додекаэдра,
+// логика сцены — с формулами из задания.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -10,7 +11,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "color.hpp"
 #include "geometry.hpp"
+#include "scene.hpp"
 #include "transform.hpp"
 
 namespace {
@@ -35,6 +38,10 @@ bool approxEqual(const glm::mat4& a, const glm::mat4& b, float epsilon = 1e-5f) 
 		}
 	}
 	return true;
+}
+
+bool approxEqual(const glm::vec3& a, const glm::vec3& b, float epsilon = 1e-5f) {
+	return glm::all(glm::lessThanEqual(glm::abs(a - b), glm::vec3(epsilon)));
 }
 
 // GLM строит проекции под OpenGL, где ось Y в clip space направлена вверх.
@@ -153,12 +160,110 @@ void testDodecahedron() {
 	check(std::all_of(degree.begin(), degree.end(), [](int d) { return d == 3; }), "every vertex belongs to 3 faces");
 }
 
+void testColor() {
+	check(color::srgbToLinear(0.0f) == 0.0f, "sRGB 0 stays 0");
+	check(std::abs(color::srgbToLinear(1.0f) - 1.0f) < 1e-6f, "sRGB 1 stays 1");
+	check(std::abs(color::srgbToLinear(0.5f) - 0.2140f) < 1e-4f, "sRGB 0.5 is 0.214 in linear space");
+}
+
+void testTrajectoryAndAnimation() {
+	const scene::Trajectory trajectory;
+	const glm::vec3 start(trajectory.radius * std::sin(trajectory.phase_shift), 0.0f, 0.0f);
+	check(approxEqual(scene::trajectoryPoint(trajectory, 0.0f), start), "trajectory starts at (R sin d, 0, 0)");
+
+	for (float phase : { 0.3f, 1.7f, 4.0f }) {
+		const glm::vec3 point = scene::trajectoryPoint(trajectory, phase);
+		const glm::vec3 next_period = scene::trajectoryPoint(trajectory, phase + 2.0f * std::numbers::pi_v<float>);
+		check(approxEqual(point, next_period, 1e-4f), "trajectory repeats after 2 pi");
+	}
+
+	scene::Animation animation;
+	animation.playing = false;
+	scene::advance(animation, 0.5f);
+	check(animation.time == 0.0f && animation.spin_angle == 0.0f, "paused animation does not move");
+
+	animation.playing = true;
+	scene::advance(animation, 0.5f);
+	check(std::abs(animation.time - 0.5f * animation.speed) < 1e-6f, "animation time grows by dt * speed");
+	check(std::abs(animation.spin_angle - 0.5f * glm::radians(animation.spin_speed_degrees)) < 1e-6f,
+	      "spin angle grows by dt * spin speed");
+}
+
+void testObjectMatrices() {
+	const glm::mat4 identity(1.0f);
+
+	scene::Object object;
+	object.animation.trajectory.radius = 0.0f;
+	object.transform.position = glm::vec3(1.0f, -2.0f, 0.5f);
+	object.transform.rotation_degrees = glm::vec3(30.0f, -45.0f, 60.0f);
+	object.transform.scale = glm::vec3(2.0f, 0.5f, 1.5f);
+
+	const glm::vec3 angles = glm::radians(object.transform.rotation_degrees);
+	glm::mat4 expected = glm::translate(identity, object.transform.position);
+	expected = glm::rotate(expected, angles.z, glm::vec3(0.0f, 0.0f, 1.0f));
+	expected = glm::rotate(expected, angles.y, glm::vec3(0.0f, 1.0f, 0.0f));
+	expected = glm::rotate(expected, angles.x, glm::vec3(1.0f, 0.0f, 0.0f));
+	expected = glm::scale(expected, object.transform.scale);
+	check(approxEqual(scene::modelMatrix(object), expected), "model matrix is T * Rz * Ry * Rx * S");
+
+	scene::Object stretched;
+	stretched.animation.trajectory.radius = 0.0f;
+	stretched.transform.position = glm::vec3(0.0f, 0.0f, 1.0f);
+	stretched.transform.rotation_degrees = glm::vec3(0.0f, 0.0f, 90.0f);
+	stretched.transform.scale = glm::vec3(2.0f, 1.0f, 1.0f);
+	const glm::vec4 moved = scene::modelMatrix(stretched) * glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+	check(approxEqual(glm::vec3(moved), glm::vec3(0.0f, 2.0f, 1.0f)), "scale is applied before rotation");
+
+	// Верхний край кадра в плоскости z = 0 одинаков в обеих проекциях: при переключении размер не скачет.
+	scene::Camera camera;
+	const float half_height = camera.distance * std::tan(glm::radians(camera.fov_degrees) / 2.0f);
+	for (scene::Projection projection : { scene::Projection::Perspective, scene::Projection::Orthographic }) {
+		camera.projection = projection;
+		const glm::vec4 clip = scene::projectionMatrix(camera, 16.0f / 9.0f) * scene::viewMatrix(camera) *
+		                       glm::vec4(0.0f, half_height, 0.0f, 1.0f);
+		check(std::abs(clip.y / clip.w + 1.0f) < 1e-5f, "top of the view at z = 0 matches in both projections");
+	}
+}
+
+void testObjectList() {
+	scene::Scene state;
+	for (int i = 0; i < 10; ++i) {
+		scene::addObject(state);
+	}
+	check(state.object_count == scene::max_objects, "no more than 8 objects");
+	check(state.selected == scene::max_objects - 1, "added object becomes selected");
+
+	bool distinct_offsets = true;
+	for (int i = 0; i < state.object_count; ++i) {
+		for (int j = i + 1; j < state.object_count; ++j) {
+			distinct_offsets = distinct_offsets && state.objects[i].animation.offset != state.objects[j].animation.offset;
+		}
+	}
+	check(distinct_offsets, "objects start at different points of the trajectory");
+
+	state.selected = 2;
+	const float next_offset = state.objects[3].animation.offset;
+	scene::removeSelected(state);
+	check(state.object_count == scene::max_objects - 1, "removal decreases the object count");
+	check(state.objects[2].animation.offset == next_offset, "removal shifts the following objects");
+
+	for (int i = 0; i < 10; ++i) {
+		state.selected = state.object_count - 1;
+		scene::removeSelected(state);
+	}
+	check(state.object_count == 1 && state.selected == 0, "at least one object remains");
+}
+
 } // namespace
 
 int main() {
 	testAffine();
 	testProjections();
 	testDodecahedron();
+	testColor();
+	testTrajectoryAndAnimation();
+	testObjectMatrices();
+	testObjectList();
 
 	std::printf("%d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;
