@@ -1,66 +1,56 @@
-# 🌋 Vulkan Starter App
+# Компьютерная графика: лабораторные работы на Vulkan
 
-## Getting started
+Код основан на [стартовом проекте](https://github.com/vladeemerr/vulkan-starter-app) преподавателя: GLFW, vk-bootstrap, Vulkan Memory Allocator и Dear ImGui.
 
-You need C++ compiler, Vulkan SDK and CMake installed before you can build this project.
+## Лабораторная работа №1. Основы 3D-графики
 
-This project uses C++20 standard and thus requires either of those compilers:
-- GCC 10.X
-- Clang 10
-- Microsoft Visual Studio 2019
+**Вариант 10 — правильный додекаэдр.**
 
-This is officially tested on *Windows* and *GNU/Linux platforms*, no *macOS* support yet.
-If you have a working macOS solution of this code, consider submitting a PR so others
-can build this example code without a hassle!
+Построить правильный додекаэдр, спроецировать его на плоскость экрана и отрисовывать в реальном времени с помощью Vulkan. Проекцию и трансформации объекта можно менять во время работы программы.
 
-<ins>**1. Downloading the repository**</ins>
+| Задание | Статус |
+|---|---|
+| Основное: правильный додекаэдр в перспективной проекции | ✅ |
+| 1. Переключение ортографической и перспективной проекции | ⏳ |
+| 2. Позиция, поворот и масштаб фигуры в интерфейсе | ⏳ |
+| 3. Движение и вращение по сложной траектории, пауза, скорость и параметры траектории | ⏳ |
+| 4. Цвет фигуры в интерфейсе | ⏳ |
+| 5. Процедурные цвета вершин, умножаемые на цвет из интерфейса | ⏳ |
+| 6. Несколько объектов, у каждого свой набор дескрипторов | ⏳ |
 
-Start by cloning the repository with `git clone --depth 1 https://github.com/vladeemerr/vulkan-starter-app`
+### Как устроено
 
-This repository does not contain any submodules, it utilizes CMake's `FetchContent` feature instead.
+- Додекаэдр строится в коде ([geometry.cpp](source/geometry.cpp)). Вершины: (±1, ±1, ±1), (0, ±1/φ, ±φ), (±1/φ, ±φ, 0), (±φ, 0, ±1/φ), где φ — золотое сечение. Нормали 12 граней направлены на вершины двойственного икосаэдра: для каждой нормали берутся 5 самых удалённых вдоль неё вершин и упорядочиваются по углу. Каждый пятиугольник разбит на 3 треугольника: всего 36 треугольников и 108 индексов.
+- Матрицы переноса, поворота, масштаба, вида и проекций написаны вручную ([transform.cpp](source/transform.cpp)) под соглашения Vulkan: ось Y в clip space направлена вниз, глубина лежит в [0, 1].
+- У каждого объекта свой uniform buffer с матрицами model, view, proj и цветом и свой descriptor set, который на него ссылается.
+- Цвет вершины вычисляется из её положения: `position · 0.5 + 0.5`.
 
-<ins>**2. Configuring the project**</ins>
+### Сборка
 
-Run either one of the CMake lines to download dependencies and configure the project:
+Нужны компилятор C++20, CMake 3.20+, Ninja и Vulkan SDK (в нём есть компилятор шейдеров `glslc`). Остальные зависимости CMake скачивает сам.
 
-```bash
-cmake --preset debug       # for GNU/Linux (GCC/Clang)
-cmake --preset msvc-debug  # for Windows (Visual Studio 2019)
-cmake --preset mingw-debug # for Windows (MinGW)
-```
-
-If you wish to build in `release` mode, change `debug` to `release`.
-
-If changes are made (added/removed files), or if you want to regenerate project files, rerun the command above.
-
-<ins>**3. Building**</ins>
-
-To build the project, use the line below. You are most likely using `debug` preset, so
-the directory that will eventually contain your build files is named `build-debug`.
-
-Likewise for `release` that directory will be named `build-release`
-
-Run one those commands, depending on which preset you chose:
+- **macOS:** установить [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) с компонентом *System Global Installation* и Ninja (`brew install ninja`).
+- **Linux, Windows:** см. раздел Getting started в [README стартового проекта](https://github.com/vladeemerr/vulkan-starter-app#getting-started).
 
 ```bash
-cmake --build build-debug --parallel # for debug
-cmake --build build-release --parallel # for release
+cmake --preset debug
+cmake --build build-debug
 ```
 
-### Running
+### Запуск
 
-`build-*` directory will contain the executable in one of the subdirectories after successful build.
+Из корня репозитория, иначе программа не найдёт шейдеры:
 
-For `msvc-{debug|release}` builds output subdirectory is set to `Debug` or `Release` respectively.
-For other configurations output subdirectory is set to `vulkan-starter-app`.
+```bash
+./build-debug/vulkan-starter-app
+```
 
-**Make sure your working directory is set to the project root!**
-Project root is where this README file resides. Otherwise, the
-code responsible for loading shaders or other resources from files will fail,
-because relative paths are used.
+Окно **Lab 1** в левом верхнем углу: скорость вращения, расстояние до камеры и угол обзора.
 
-### Compiling shaders
+### Тесты
 
-`CMakeLists.txt` has a build recipe for compiling shader files
-along with an application. Look for a comment in this file to see
-how to compile your shaders.
+```bash
+./build-debug/lab_tests
+```
+
+Тесты сверяют матрицы с GLM и проверяют геометрию додекаэдра: 20 вершин на единичной сфере, 30 рёбер одной длины, 12 граней, V − E + F = 2, замкнутость поверхности и обход треугольников против часовой стрелки снаружи.
