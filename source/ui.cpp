@@ -47,6 +47,31 @@ void drawTransformSection(scene::Transform& transform) {
 	}
 }
 
+void drawAnimationSection(scene::Animation& animation) {
+	if (!ImGui::CollapsingHeader("Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	// После ### идёт идентификатор кнопки: он не меняется, когда меняется подпись.
+	if (ImGui::Button(animation.playing ? "Pause###playback" : "Play###playback")) {
+		animation.playing = !animation.playing;
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Reset animation")) {
+		animation.time = 0.0f;
+		animation.spin_angle = 0.0f;
+	}
+
+	ImGui::SliderFloat("Speed", &animation.speed, 0.0f, 3.0f, "%.2f rad/s");
+	ImGui::SliderFloat("Spin speed", &animation.spin_speed_degrees, -360.0f, 360.0f, "%.0f deg/s");
+
+	scene::Trajectory& trajectory = animation.trajectory;
+	ImGui::SliderFloat("Radius", &trajectory.radius, 0.0f, 3.0f, "%.2f");
+	ImGui::SliderInt3("Frequencies", &trajectory.frequencies.x, 1, 5);
+	ImGui::SliderAngle("Phase shift", &trajectory.phase_shift, 0.0f, 360.0f);
+	ImGui::TextDisabled("p(t) = R (sin(a t + shift), sin(b t), sin(c t))");
+}
+
 } // namespace
 
 void drawSceneWindow(scene::Scene& scene) {
@@ -59,6 +84,7 @@ void drawSceneWindow(scene::Scene& scene) {
 
 	scene::Object& object = scene.objects[scene.selected];
 	drawTransformSection(object.transform);
+	drawAnimationSection(object.animation);
 
 	ImGui::PopItemWidth();
 	ImGui::End();
