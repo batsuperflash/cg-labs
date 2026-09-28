@@ -106,6 +106,40 @@ if(GLSLC_FOUND)
 	# compile_shader(example.vert)
 	# compile_shader(example.frag)
 
+	compile_shader(mesh.vert)
+	compile_shader(mesh.frag)
+
 	add_custom_target(shaders DEPENDS ${_SHADER_BINARIES})
 	add_dependencies(${PROJECT_NAME} shaders)
+endif()
+
+# Lab code
+
+FetchContent_Declare(
+	glm
+	GIT_REPOSITORY https://github.com/g-truc/glm.git
+	GIT_TAG 1.0.1
+	GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(glm)
+
+target_sources(${PROJECT_NAME} PRIVATE
+	source/graphics.cpp
+	source/geometry.cpp
+	source/transform.cpp
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
+
+# Tests for matrices and geometry: no window and no Vulkan required
+add_executable(lab_tests tests/lab_tests.cpp source/geometry.cpp source/transform.cpp)
+set_target_properties(lab_tests PROPERTIES CXX_STANDARD_REQUIRED TRUE CXX_STANDARD 20)
+target_include_directories(lab_tests PRIVATE source)
+target_link_libraries(lab_tests PRIVATE glm::glm)
+
+if(MSVC)
+	target_compile_options(lab_tests PRIVATE /W4)
+else()
+	target_compile_options(lab_tests PRIVATE -Wall -Wextra)
 endif()
