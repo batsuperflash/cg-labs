@@ -98,9 +98,9 @@ struct PointLight {
 // что и у камеры. Углы отсчитываются от оси конуса: внутри inner свет полный, между inner и outer плавно
 // затухает до нуля, за пределами outer света нет. Если углы равны, край резкий.
 struct SpotLight {
-	glm::vec3 position = glm::vec3(0.0f, 6.0f, 4.0f);
+	glm::vec3 position = glm::vec3(0.0f, 4.5f, 4.0f);
 	float yaw_degrees = 0.0f;
-	float pitch_degrees = -56.0f;
+	float pitch_degrees = -50.0f;
 	glm::vec3 color = glm::vec3(1.0f, 0.95f, 0.8f);
 	float intensity = 80.0f;
 	float inner_degrees = 12.0f;
@@ -123,6 +123,8 @@ struct Scene {
 	int selected_point = 0;
 	std::vector<SpotLight> spot_lights;
 	int selected_spot = 0;
+	bool show_light_markers = true; // яркие кубы на месте точечных и прожекторных источников
+	bool show_spot_cones = true;    // конус и ось прожектора белыми линиями
 };
 
 // Единичный вектор по углам: yaw = 0, pitch = 0 даёт (0, 0, -1), положительный pitch поднимает вектор вверх.
@@ -167,6 +169,17 @@ PointLight makePointLight(int index);
 SpotLight makeSpotLight(int index);
 void addSpotLight(Scene& scene);
 void removeSelectedSpotLight(Scene& scene);
+
+// Размеры значков источников света в мировых единицах.
+constexpr float light_marker_size = 0.2f;  // половина стороны куба
+constexpr float spot_cone_length = 3.0f;   // длина оси нарисованного конуса
+
+// Куб [-1, 1]^3 превращается в маленький куб в точке источника.
+glm::mat4 lightMarkerMatrix(const glm::vec3& position);
+
+// Конус из makeSpotCone(): вершина в позиции прожектора, ось по направлению света,
+// длина spot_cone_length, радиус основания по внешнему углу.
+glm::mat4 spotConeMatrix(const SpotLight& light);
 
 // Начальная сцена: несколько объектов на траекториях и пол.
 Scene makeDefaultScene();

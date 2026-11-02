@@ -81,11 +81,13 @@ struct MeshGpu {
 	uint32_t index_count;
 };
 
-// Сколько моделей можно нарисовать за кадр: объекты и пол.
-constexpr uint32_t max_draws = scene::max_objects + 1;
+// Сколько моделей можно нарисовать за кадр: объекты, пол, значки всех источников и конусы прожекторов.
+constexpr uint32_t max_draws = scene::max_objects + 1 + scene::max_point_lights + 2 * scene::max_spot_lights;
 
 MeshGpu dodecahedron_mesh;
 MeshGpu plane_mesh;
+MeshGpu cube_mesh;
+MeshGpu cone_mesh;
 
 graphics::Buffer scene_uniforms;
 graphics::Buffer point_lights_buffer; // место под max_point_lights элементов, используется столько, сколько источников в сцене
@@ -94,7 +96,9 @@ graphics::Buffer spot_lights_buffer;
 VkDescriptorSetLayout vk_scene_set_layout;
 VkDescriptorSetLayout vk_model_set_layout;
 VkPipelineLayout vk_pipeline_layout;
-VkPipeline vk_pipeline;
+VkPipeline vk_pipeline;      // освещаемые модели по Блинну-Фонгу
+VkPipeline vk_flat_pipeline; // значки источников: треугольники одного цвета
+VkPipeline vk_line_pipeline; // конусы прожекторов: линии одного цвета
 VkDescriptorPool vk_descriptor_pool;
 VkDescriptorSet vk_scene_set;
 
@@ -180,7 +184,8 @@ bool createResources() {
 	auto& context = graphics::internal::context;
 
 	if (!createMesh(geometry::makeDodecahedron(), dodecahedron_mesh) ||
-	    !createMesh(geometry::makePlane(), plane_mesh)) {
+	    !createMesh(geometry::makePlane(), plane_mesh) || !createMesh(geometry::makeCube(), cube_mesh) ||
+	    !createMesh(geometry::makeSpotCone(), cone_mesh)) {
 		return false;
 	}
 
@@ -268,12 +273,14 @@ bool createResources() {
 	};
 
 	const VkShaderModule vertex_shader = graphics::loadShaderModule("shaders/mesh.vert.spv");
-	const VkShaderModule fragment_shader = graphics::loadShaderModule("shaders/mesh.frag.spv");
+	const VkShaderModule lit_shader = graphics::loadShaderModule("shaders/mesh.frag.spv");
+	const VkShaderModule flat_shader = graphics::loadShaderModule("shaders/flat.frag.spv");
 
-	if (vertex_shader != VK_NULL_HANDLE && fragment_shader != VK_NULL_HANDLE) {
-		vk_pipeline = graphics::createPipeline({
+	if (vertex_shader != VK_NULL_HANDLE && lit_shader != VK_NULL_HANDLE && flat_shader != VK_NULL_HANDLE) {
+		// Три конвейера отличаются фрагментным шейдером и топологией, всё остальное общее.
+		graphics::PipelineDesc desc = {
 			.vertex_shader = vertex_shader,
-			.fragment_shader = fragment_shader,
+			.fragment_shader = lit_shader,
 			.layout = vk_pipeline_layout,
 			.vertex_binding = {
 				.binding = 0,
@@ -281,14 +288,23 @@ bool createResources() {
 				.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
 			},
 			.vertex_attributes = vertex_attributes,
-		});
+		};
+
+		vk_pipeline = graphics::createPipeline(desc);
+
+		desc.fragment_shader = flat_shader;
+		vk_flat_pipeline = graphics::createPipeline(desc);
+
+		desc.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+		vk_line_pipeline = graphics::createPipeline(desc);
 	}
 
-	// После создания конвейера шейдерные модули больше не нужны.
+	// После создания конвейеров шейдерные модули больше не нужны.
 	vkDestroyShaderModule(context.device, vertex_shader, nullptr);
-	vkDestroyShaderModule(context.device, fragment_shader, nullptr);
+	vkDestroyShaderModule(context.device, lit_shader, nullptr);
+	vkDestroyShaderModule(context.device, flat_shader, nullptr);
 
-	if (vk_pipeline == VK_NULL_HANDLE) {
+	if (vk_pipeline == VK_NULL_HANDLE || vk_flat_pipeline == VK_NULL_HANDLE || vk_line_pipeline == VK_NULL_HANDLE) {
 		return false;
 	}
 
@@ -359,10 +375,14 @@ void shutdown() {
 	graphics::destroyBuffer(point_lights_buffer);
 	graphics::destroyBuffer(scene_uniforms);
 	vkDestroyDescriptorPool(context.device, vk_descriptor_pool, nullptr);
+	vkDestroyPipeline(context.device, vk_line_pipeline, nullptr);
+	vkDestroyPipeline(context.device, vk_flat_pipeline, nullptr);
 	vkDestroyPipeline(context.device, vk_pipeline, nullptr);
 	vkDestroyPipelineLayout(context.device, vk_pipeline_layout, nullptr);
 	vkDestroyDescriptorSetLayout(context.device, vk_model_set_layout, nullptr);
 	vkDestroyDescriptorSetLayout(context.device, vk_scene_set_layout, nullptr);
+	destroyMesh(cone_mesh);
+	destroyMesh(cube_mesh);
 	destroyMesh(plane_mesh);
 	destroyMesh(dodecahedron_mesh);
 }
@@ -539,13 +559,13 @@ void render(const graphics::internal::FrameData& fd) {
 	vkCmdSetViewport(fd.command_buffer, 0, 1, &viewport);
 	vkCmdSetScissor(fd.command_buffer, 0, 1, &scissor);
 
-	vkCmdBindPipeline(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
-
 	// Набор сцены подставляется один раз на кадр: он общий для всех моделей.
 	vkCmdBindDescriptorSets(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline_layout,
 	                        0, 1, &vk_scene_set, 0, nullptr);
 
 	uint32_t next_slot = 0;
+
+	vkCmdBindPipeline(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline);
 
 	for (int i = 0; i < world.object_count; ++i) {
 		const scene::Object& object = world.objects[i];
@@ -557,6 +577,35 @@ void render(const graphics::internal::FrameData& fd) {
 		// Нормаль пола всегда смотрит вверх, поэтому матрица для нормалей единичная.
 		drawModel(fd.command_buffer, next_slot, plane_mesh,
 		          makeModelUniforms(scene::floorMatrix(world.floor), glm::mat4(1.0f), world.floor.material));
+	}
+
+	// Значки источников не освещаются: другой конвейер выводит цвет источника как есть.
+	if (world.show_light_markers) {
+		vkCmdBindPipeline(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_flat_pipeline);
+
+		auto drawMarker = [&](const glm::vec3& position, const glm::vec3& color) {
+			const scene::Material marker = { color, glm::vec3(0.0f), 1.0f };
+			drawModel(fd.command_buffer, next_slot, cube_mesh,
+			          makeModelUniforms(scene::lightMarkerMatrix(position), glm::mat4(1.0f), marker));
+		};
+
+		for (const scene::PointLight& light : world.point_lights) {
+			drawMarker(light.position, light.color);
+		}
+		for (const scene::SpotLight& light : world.spot_lights) {
+			drawMarker(light.position, light.color);
+		}
+	}
+
+	// Контур прожектора рисуется белыми линиями.
+	if (world.show_spot_cones) {
+		vkCmdBindPipeline(fd.command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_line_pipeline);
+
+		const scene::Material white = { glm::vec3(1.0f), glm::vec3(0.0f), 1.0f };
+		for (const scene::SpotLight& light : world.spot_lights) {
+			drawModel(fd.command_buffer, next_slot, cone_mesh,
+			          makeModelUniforms(scene::spotConeMatrix(light), glm::mat4(1.0f), white));
+		}
 	}
 
 	vkCmdEndRenderPass(fd.command_buffer);

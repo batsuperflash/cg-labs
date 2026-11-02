@@ -102,4 +102,55 @@ Mesh makePlane() {
 	return mesh;
 }
 
+Mesh makeCube() {
+	// Для каждой грани: нормаль n и два вектора u, v в её плоскости так, что u × v = n.
+	// Тогда вершины n − u − v, n + u − v, n + u + v, n − u + v идут против часовой стрелки при взгляде снаружи.
+	const glm::vec3 x(1.0f, 0.0f, 0.0f);
+	const glm::vec3 y(0.0f, 1.0f, 0.0f);
+	const glm::vec3 z(0.0f, 0.0f, 1.0f);
+	const glm::vec3 faces[][3] = {
+		{ x, y, z }, { -x, z, y },
+		{ y, z, x }, { -y, x, z },
+		{ z, x, y }, { -z, y, x },
+	};
+
+	Mesh mesh;
+	for (const auto& [n, u, v] : faces) {
+		const uint16_t first = static_cast<uint16_t>(mesh.vertices.size());
+		mesh.vertices.push_back({ n - u - v, n });
+		mesh.vertices.push_back({ n + u - v, n });
+		mesh.vertices.push_back({ n + u + v, n });
+		mesh.vertices.push_back({ n - u + v, n });
+		mesh.indices.insert(mesh.indices.end(), { first, uint16_t(first + 1), uint16_t(first + 2),
+		                                          first, uint16_t(first + 2), uint16_t(first + 3) });
+	}
+	return mesh;
+}
+
+Mesh makeSpotCone() {
+	constexpr int segments = 32;
+	const glm::vec3 no_normal(0.0f);
+
+	// 0 — вершина конуса, 1..segments — окружность основания, segments + 1 — центр основания (конец оси).
+	Mesh mesh;
+	mesh.vertices.push_back({ glm::vec3(0.0f), no_normal });
+	for (int i = 0; i < segments; ++i) {
+		const float angle = 2.0f * std::numbers::pi_v<float> * float(i) / float(segments);
+		mesh.vertices.push_back({ glm::vec3(std::cos(angle), std::sin(angle), -1.0f), no_normal });
+	}
+	mesh.vertices.push_back({ glm::vec3(0.0f, 0.0f, -1.0f), no_normal });
+
+	for (int i = 0; i < segments; ++i) {
+		mesh.indices.push_back(static_cast<uint16_t>(1 + i));
+		mesh.indices.push_back(static_cast<uint16_t>(1 + (i + 1) % segments));
+	}
+	for (int i = 0; i < segments; i += segments / 4) {
+		mesh.indices.push_back(0);
+		mesh.indices.push_back(static_cast<uint16_t>(1 + i));
+	}
+	mesh.indices.push_back(0);
+	mesh.indices.push_back(static_cast<uint16_t>(segments + 1));
+	return mesh;
+}
+
 } // namespace geometry

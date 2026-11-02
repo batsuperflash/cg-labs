@@ -30,9 +30,10 @@ struct PipelineDesc {
 	VkPipelineLayout layout;
 	VkVertexInputBindingDescription vertex_binding;
 	std::span<const VkVertexInputAttributeDescription> vertex_attributes;
+	VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 };
 
-// Конвейер для треугольников в основном render pass: тест глубины, отсечение задних граней,
+// Конвейер для примитивов заданной топологии (по умолчанию треугольники) в основном render pass: тест глубины, отсечение задних граней,
 // динамические viewport и scissor. При ошибке возвращает VK_NULL_HANDLE.
 VkPipeline createPipeline(const PipelineDesc& desc);
 

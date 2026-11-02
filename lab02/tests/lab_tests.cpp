@@ -275,6 +275,54 @@ void testObjectMatrices() {
 	}
 }
 
+void testCubeAndCone() {
+	const geometry::Mesh cube = geometry::makeCube();
+	check(cube.vertices.size() == 24 && cube.indices.size() == 36, "cube has 24 vertices and 12 triangles");
+	for (size_t i = 0; i + 2 < cube.indices.size(); i += 3) {
+		const geometry::Vertex& a = cube.vertices[cube.indices[i]];
+		const geometry::Vertex& b = cube.vertices[cube.indices[i + 1]];
+		const geometry::Vertex& c = cube.vertices[cube.indices[i + 2]];
+		check(approxEqual(glm::normalize(glm::cross(b.position - a.position, c.position - a.position)), a.normal, 1e-5f),
+		      "cube triangles are counter-clockwise from outside");
+	}
+
+	const geometry::Mesh cone = geometry::makeSpotCone();
+	check(cone.indices.size() % 2 == 0, "cone is a list of lines");
+	for (uint16_t index : cone.indices) {
+		check(index < cone.vertices.size(), "cone line indices are valid");
+	}
+	check(cone.vertices.size() > 2 && approxEqual(cone.vertices[0].position, glm::vec3(0.0f)), "cone starts at the origin");
+	for (size_t i = 1; i + 1 < cone.vertices.size(); ++i) {
+		const glm::vec3 p = cone.vertices[i].position;
+		check(std::abs(p.z + 1.0f) < 1e-5f && std::abs(glm::length(glm::vec2(p)) - 1.0f) < 1e-5f,
+		      "cone base is a unit circle at z = -1");
+	}
+}
+
+void testLightVisualization() {
+	scene::SpotLight light;
+	light.position = glm::vec3(1.0f, 5.0f, -2.0f);
+	light.yaw_degrees = 40.0f;
+	light.pitch_degrees = -35.0f;
+	light.outer_degrees = 30.0f;
+
+	const glm::mat4 cone = scene::spotConeMatrix(light);
+	const glm::vec3 direction = scene::directionFromAngles(light.yaw_degrees, light.pitch_degrees);
+	check(approxEqual(glm::vec3(cone * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)), light.position), "cone apex is at the light");
+	check(approxEqual(glm::vec3(cone * glm::vec4(0.0f, 0.0f, -1.0f, 1.0f)),
+	                  light.position + scene::spot_cone_length * direction, 1e-4f),
+	      "cone axis points along the light direction");
+
+	// Точка основания конуса видна из вершины под внешним углом к оси.
+	const glm::vec3 rim = glm::vec3(cone * glm::vec4(1.0f, 0.0f, -1.0f, 1.0f)) - light.position;
+	check(std::abs(glm::dot(glm::normalize(rim), direction) - std::cos(glm::radians(light.outer_degrees))) < 1e-4f,
+	      "cone rim lies at the outer angle from the axis");
+
+	const glm::mat4 marker = scene::lightMarkerMatrix(light.position);
+	check(approxEqual(glm::vec3(marker * glm::vec4(1.0f, 1.0f, 1.0f, 1.0f)),
+	                  light.position + glm::vec3(scene::light_marker_size)), "marker is a small cube at the light");
+}
+
 void testNormalMatrix() {
 	scene::Object object;
 	object.animation.trajectory.radius = 0.0f;
@@ -426,6 +474,8 @@ int main() {
 	testProjections();
 	testDodecahedron();
 	testPlane();
+	testCubeAndCone();
+	testLightVisualization();
 	testNormalMatrix();
 	testCamera();
 	testPointLightList();

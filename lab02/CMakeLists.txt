@@ -108,6 +108,7 @@ if(GLSLC_FOUND)
 
 	compile_shader(mesh.vert)
 	compile_shader(mesh.frag)
+	compile_shader(flat.frag)
 
 	add_custom_target(shaders DEPENDS ${_SHADER_BINARIES})
 	add_dependencies(${PROJECT_NAME} shaders)

@@ -98,10 +98,10 @@ VkPipeline createPipeline(const PipelineDesc& desc) {
 		.pVertexAttributeDescriptions = desc.vertex_attributes.data(),
 	};
 
-	// MoltenVK не поддерживает TRIANGLE_FAN, поэтому только списки треугольников.
+	// MoltenVK не поддерживает TRIANGLE_FAN, поэтому используются только списки: треугольников или линий.
 	const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-		.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		.topology = desc.topology,
 	};
 
 	// Сами viewport и scissor задаются при записи команд, поэтому конвейер не зависит от размера окна.

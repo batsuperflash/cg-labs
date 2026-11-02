@@ -258,6 +258,16 @@ void drawSpotLightsSection(scene::Scene& scene) {
 	ImGui::PopID();
 }
 
+void drawVisualizationSection(scene::Scene& scene) {
+	if (!ImGui::CollapsingHeader("Light visualization", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	ImGui::Checkbox("Show light markers", &scene.show_light_markers);
+	ImGui::Checkbox("Show spot light cones", &scene.show_spot_cones);
+	ImGui::TextDisabled("Markers are cubes in the color of the light, unlit");
+}
+
 void drawFloorSection(scene::Floor& floor) {
 	if (!ImGui::CollapsingHeader("Floor")) {
 		return;
@@ -281,6 +291,7 @@ void drawSceneWindow(scene::Scene& scene) {
 	drawLightingSection(scene);
 	drawPointLightsSection(scene);
 	drawSpotLightsSection(scene);
+	drawVisualizationSection(scene);
 	drawFloorSection(scene.floor);
 	drawObjectsSection(scene);
 

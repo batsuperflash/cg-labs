@@ -184,7 +184,7 @@ SpotLight makeSpotLight(int index) {
 
 	SpotLight light;
 	light.color = index == 0 ? light.color : light_palette[(index + 2) % palette_size];
-	light.position = glm::vec3(-4.0f + 2.0f * float(index % 5), 6.0f, 4.0f);
+	light.position = glm::vec3(-4.0f + 2.0f * float(index % 5), 4.5f, 4.0f);
 	return light;
 }
 
@@ -204,6 +204,21 @@ void removeSelectedSpotLight(Scene& scene) {
 
 	scene.spot_lights.erase(scene.spot_lights.begin() + scene.selected_spot);
 	scene.selected_spot = std::clamp(scene.selected_spot, 0, std::max(int(scene.spot_lights.size()) - 1, 0));
+}
+
+glm::mat4 lightMarkerMatrix(const glm::vec3& position) {
+	return transform::translate(position) * transform::scale(glm::vec3(light_marker_size));
+}
+
+glm::mat4 spotConeMatrix(const SpotLight& light) {
+	const float radius = spot_cone_length * std::tan(glm::radians(light.outer_degrees));
+
+	// Поворот, который переводит -Z в направление света: сначала наклон pitch вокруг X, потом поворот вокруг Y.
+	const glm::mat4 orientation = transform::rotateY(-glm::radians(light.yaw_degrees)) *
+	                              transform::rotateX(glm::radians(light.pitch_degrees));
+
+	return transform::translate(light.position) * orientation *
+	       transform::scale(glm::vec3(radius, radius, spot_cone_length));
 }
 
 Scene makeDefaultScene() {
