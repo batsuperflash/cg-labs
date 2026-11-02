@@ -23,6 +23,16 @@ const glm::vec3 palette[max_objects] = {
 	{ 1.0f, 0.5f, 0.1f },
 };
 
+// Цвета новых источников света.
+const glm::vec3 light_palette[] = {
+	{ 1.0f, 0.35f, 0.25f },
+	{ 0.3f, 0.5f, 1.0f },
+	{ 1.0f, 0.9f, 0.4f },
+	{ 0.4f, 1.0f, 0.5f },
+	{ 1.0f, 0.4f, 0.9f },
+	{ 0.4f, 1.0f, 1.0f },
+};
+
 } // namespace
 
 glm::vec3 directionFromAngles(float yaw_degrees, float pitch_degrees) {
@@ -142,6 +152,33 @@ void removeSelected(Scene& scene) {
 	scene.selected = std::min(scene.selected, scene.object_count - 1);
 }
 
+PointLight makePointLight(int index) {
+	constexpr int palette_size = sizeof(light_palette) / sizeof(light_palette[0]);
+
+	PointLight light;
+	light.color = light_palette[index % palette_size];
+	light.position = glm::vec3(-4.0f + 2.0f * float(index % 5), 1.0f, 2.0f);
+	return light;
+}
+
+void addPointLight(Scene& scene) {
+	if (int(scene.point_lights.size()) >= max_point_lights) {
+		return;
+	}
+
+	scene.point_lights.push_back(makePointLight(int(scene.point_lights.size())));
+	scene.selected_point = int(scene.point_lights.size()) - 1;
+}
+
+void removeSelectedPointLight(Scene& scene) {
+	if (scene.point_lights.empty()) {
+		return;
+	}
+
+	scene.point_lights.erase(scene.point_lights.begin() + scene.selected_point);
+	scene.selected_point = std::clamp(scene.selected_point, 0, std::max(int(scene.point_lights.size()) - 1, 0));
+}
+
 Scene makeDefaultScene() {
 	Scene scene;
 	scene.object_count = 3;
@@ -149,6 +186,11 @@ Scene makeDefaultScene() {
 		scene.objects[i] = makeObject(i);
 		scene.objects[i].animation.offset = two_pi * float(i) / float(scene.object_count);
 	}
+
+	scene.point_lights = {
+		{ glm::vec3(-5.0f, 0.5f, 2.0f), light_palette[0], 25.0f },
+		{ glm::vec3(5.0f, -0.5f, 1.0f), light_palette[1], 25.0f },
+	};
 	return scene;
 }
 

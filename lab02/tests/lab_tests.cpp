@@ -332,6 +332,31 @@ void testCamera() {
 	check(camera.yaw_degrees >= -180.0f && camera.yaw_degrees <= 180.0f, "yaw wraps into [-180, 180]");
 }
 
+void testPointLightList() {
+	scene::Scene state;
+	check(state.point_lights.empty(), "a scene starts without point lights");
+
+	for (int i = 0; i < 20; ++i) {
+		scene::addPointLight(state);
+	}
+	check(int(state.point_lights.size()) == scene::max_point_lights, "no more than 16 point lights");
+	check(state.selected_point == scene::max_point_lights - 1, "added light becomes selected");
+
+	state.selected_point = 1;
+	const glm::vec3 next_color = state.point_lights[2].color;
+	const int before = int(state.point_lights.size());
+	scene::removeSelectedPointLight(state);
+	check(int(state.point_lights.size()) == before - 1, "removal decreases the light count");
+	check(state.point_lights[1].color == next_color, "removal shifts the following lights");
+
+	while (!state.point_lights.empty()) {
+		state.selected_point = int(state.point_lights.size()) - 1;
+		scene::removeSelectedPointLight(state);
+	}
+	scene::removeSelectedPointLight(state);
+	check(state.point_lights.empty() && state.selected_point == 0, "all point lights can be removed");
+}
+
 void testDefaultScene() {
 	const scene::Scene state = scene::makeDefaultScene();
 	check(state.object_count >= 1 && state.object_count <= scene::max_objects, "default scene has objects");
@@ -376,6 +401,7 @@ int main() {
 	testPlane();
 	testNormalMatrix();
 	testCamera();
+	testPointLightList();
 	testDefaultScene();
 	testTrajectoryAndAnimation();
 	testObjectMatrices();

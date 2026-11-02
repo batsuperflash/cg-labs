@@ -2,6 +2,7 @@
 
 #include <array>
 #include <numbers>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -86,7 +87,15 @@ struct DirectionalLight {
 	float intensity = 1.0f;
 };
 
+// Точечный источник: светит во все стороны из одной точки, яркость убывает как 1 / r².
+struct PointLight {
+	glm::vec3 position = glm::vec3(0.0f, 1.0f, 2.0f);
+	glm::vec3 color = glm::vec3(1.0f);
+	float intensity = 20.0f;
+};
+
 constexpr int max_objects = 8;
+constexpr int max_point_lights = 16;
 
 struct Scene {
 	Camera camera;
@@ -96,6 +105,8 @@ struct Scene {
 	std::array<Object, max_objects> objects = {};
 	int object_count = 1;
 	int selected = 0;
+	std::vector<PointLight> point_lights;
+	int selected_point = 0;
 };
 
 // Единичный вектор по углам: yaw = 0, pitch = 0 даёт (0, 0, -1), положительный pitch поднимает вектор вверх.
@@ -130,6 +141,11 @@ glm::mat4 floorMatrix(const Floor& floor);
 Object makeObject(int index);
 void addObject(Scene& scene);
 void removeSelected(Scene& scene);
+
+// Новый источник получает свой цвет и стартует рядом с центром сцены.
+PointLight makePointLight(int index);
+void addPointLight(Scene& scene);
+void removeSelectedPointLight(Scene& scene);
 
 // Начальная сцена: несколько объектов на траекториях и пол.
 Scene makeDefaultScene();

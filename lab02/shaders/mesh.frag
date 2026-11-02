@@ -8,6 +8,7 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
 	vec4 ambient;
 	vec4 sun_direction;
 	vec4 sun_radiance;
+	uvec4 counts;
 } scene;
 
 layout(set = 1, binding = 0) uniform ModelUniforms {
@@ -16,6 +17,17 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	vec4 albedo;
 	vec4 specular;
 } object;
+
+// Массивы источников лежат в storage buffer, поэтому размер массива в шейдере не задан:
+// сколько источников, говорит scene.counts.
+struct PointLight {
+	vec4 position; // xyz
+	vec4 radiance; // rgb = цвет * интенсивность
+};
+
+layout(std430, set = 0, binding = 1) readonly buffer PointLights {
+	PointLight lights[];
+} point_lights;
 
 layout(location = 0) in vec3 in_world_position;
 layout(location = 1) in vec3 in_world_normal;
@@ -40,6 +52,16 @@ void main() {
 
 	if (scene.sun_direction.w > 0.5) {
 		color += blinnPhong(N, V, -scene.sun_direction.xyz, scene.sun_radiance.rgb);
+	}
+
+	for (uint i = 0u; i < scene.counts.x; ++i) {
+		PointLight light = point_lights.lights[i];
+
+		vec3 to_light = light.position.xyz - in_world_position;
+		float distance_squared = max(dot(to_light, to_light), 1e-4);
+
+		// Закон обратных квадратов: яркость убывает как 1 / r².
+		color += blinnPhong(N, V, to_light * inversesqrt(distance_squared), light.radiance.rgb / distance_squared);
 	}
 
 	out_color = vec4(color, 1.0);

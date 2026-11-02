@@ -32,11 +32,21 @@ struct SceneUniforms {
 	glm::vec4 ambient;       // rgb = цвет * интенсивность
 	glm::vec4 sun_direction; // xyz = куда идёт свет, w = 1, если включён
 	glm::vec4 sun_radiance;  // rgb = цвет * интенсивность
+	glm::uvec4 counts;       // x = число точечных источников
 };
 
-static_assert(sizeof(SceneUniforms) == 192);
+static_assert(sizeof(SceneUniforms) == 208);
 static_assert(offsetof(SceneUniforms, camera_position) == 128);
 static_assert(offsetof(SceneUniforms, sun_radiance) == 176);
+static_assert(offsetof(SceneUniforms, counts) == 192);
+
+// Элемент массива в storage buffer. Раскладка std430: все поля vec4, поэтому размер 32 байта без дыр.
+struct PointLightGpu {
+	glm::vec4 position;
+	glm::vec4 radiance; // rgb = цвет * интенсивность
+};
+
+static_assert(sizeof(PointLightGpu) == 32);
 
 // Раскладка std140 должна совпадать с блоком ModelUniforms. Это данные одной модели: набор дескрипторов на каждое рисование.
 struct ModelUniforms {
@@ -68,6 +78,7 @@ MeshGpu dodecahedron_mesh;
 MeshGpu plane_mesh;
 
 graphics::Buffer scene_uniforms;
+graphics::Buffer point_lights_buffer; // место под max_point_lights элементов, используется столько, сколько источников в сцене
 
 VkDescriptorSetLayout vk_scene_set_layout;
 VkDescriptorSetLayout vk_model_set_layout;
@@ -114,8 +125,9 @@ void destroyMesh(MeshGpu& gpu) {
 	graphics::destroyBuffer(gpu.vertices);
 }
 
-// Записывает в набор дескрипторов ссылку на uniform buffer: слот 0 набора — это весь буфер.
-void writeUniformBufferDescriptor(VkDescriptorSet set, const graphics::Buffer& buffer, VkDeviceSize range) {
+// Записывает в набор дескрипторов ссылку на буфер: слот binding набора будет указывать на этот буфер.
+void writeBufferDescriptor(VkDescriptorSet set, uint32_t binding, VkDescriptorType type,
+                           const graphics::Buffer& buffer, VkDeviceSize range) {
 	auto& context = graphics::internal::context;
 
 	const VkDescriptorBufferInfo info = {
@@ -127,9 +139,9 @@ void writeUniformBufferDescriptor(VkDescriptorSet set, const graphics::Buffer& b
 	const VkWriteDescriptorSet write = {
 		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 		.dstSet = set,
-		.dstBinding = 0,
+		.dstBinding = binding,
 		.descriptorCount = 1,
-		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorType = type,
 		.pBufferInfo = &info,
 	};
 
@@ -161,13 +173,19 @@ bool createResources() {
 		return false;
 	}
 
-	// Набор для сцены: слот 0 — uniform buffer со SceneUniforms.
+	// Набор для сцены: слот 0 — uniform buffer со SceneUniforms, слот 1 — storage buffer с точечными источниками.
 	const VkDescriptorSetLayoutBinding scene_bindings[] = {
 		{
 			.binding = 0,
 			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+		},
+		{
+			.binding = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 		},
 	};
 
@@ -256,9 +274,10 @@ bool createResources() {
 		return false;
 	}
 
-	// Один набор для сцены и по набору на каждое рисование модели, и во всех — по одному uniform buffer.
+	// Один набор для сцены (uniform buffer и storage buffer) и по набору на каждое рисование модели (uniform buffer).
 	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1 + max_draws },
+		{ .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1 },
 	};
 
 	const VkDescriptorPoolCreateInfo descriptor_pool = {
@@ -274,11 +293,15 @@ bool createResources() {
 		return false;
 	}
 
+	constexpr VkDeviceSize point_lights_size = scene::max_point_lights * sizeof(PointLightGpu);
+
 	if (!graphics::createBuffer(sizeof(SceneUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, scene_uniforms) ||
+	    !graphics::createBuffer(point_lights_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, point_lights_buffer) ||
 	    !allocateDescriptorSet(vk_scene_set_layout, vk_scene_set)) {
 		return false;
 	}
-	writeUniformBufferDescriptor(vk_scene_set, scene_uniforms, sizeof(SceneUniforms));
+	writeBufferDescriptor(vk_scene_set, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, scene_uniforms, sizeof(SceneUniforms));
+	writeBufferDescriptor(vk_scene_set, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, point_lights_buffer, point_lights_size);
 
 	// Ресурсы создаются сразу для всех рисований, поэтому во время работы ничего не создаётся и не удаляется.
 	for (ModelGpu& model : models_gpu) {
@@ -286,7 +309,7 @@ bool createResources() {
 		    !allocateDescriptorSet(vk_model_set_layout, model.descriptor_set)) {
 			return false;
 		}
-		writeUniformBufferDescriptor(model.descriptor_set, model.uniforms, sizeof(ModelUniforms));
+		writeBufferDescriptor(model.descriptor_set, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, model.uniforms, sizeof(ModelUniforms));
 	}
 
 	return true;
@@ -311,6 +334,7 @@ void shutdown() {
 	for (ModelGpu& model : models_gpu) {
 		graphics::destroyBuffer(model.uniforms);
 	}
+	graphics::destroyBuffer(point_lights_buffer);
 	graphics::destroyBuffer(scene_uniforms);
 	vkDestroyDescriptorPool(context.device, vk_descriptor_pool, nullptr);
 	vkDestroyPipeline(context.device, vk_pipeline, nullptr);
@@ -384,7 +408,21 @@ SceneUniforms makeSceneUniforms(float aspect) {
 		.sun_direction = glm::vec4(scene::directionFromAngles(sun.yaw_degrees, sun.pitch_degrees),
 		                           sun.enabled ? 1.0f : 0.0f),
 		.sun_radiance = glm::vec4(sun.color * sun.intensity, 1.0f),
+		.counts = glm::uvec4(uint32_t(world.point_lights.size()), 0u, 0u, 0u),
 	};
+}
+
+// Копирует источники сцены в storage buffer. Копируется столько элементов, сколько источников сейчас в сцене.
+void writeLights() {
+	std::array<PointLightGpu, scene::max_point_lights> point_lights;
+	for (size_t i = 0; i < world.point_lights.size(); ++i) {
+		const scene::PointLight& light = world.point_lights[i];
+		point_lights[i] = { glm::vec4(light.position, 1.0f), glm::vec4(light.color * light.intensity, 1.0f) };
+	}
+
+	if (!world.point_lights.empty()) {
+		graphics::writeBuffer(point_lights_buffer, point_lights.data(), world.point_lights.size() * sizeof(PointLightGpu));
+	}
 }
 
 ModelUniforms makeModelUniforms(const glm::mat4& model, const glm::mat4& normal_matrix, const scene::Material& material) {
@@ -427,6 +465,7 @@ void render(const graphics::internal::FrameData& fd) {
 
 	const SceneUniforms scene_data = makeSceneUniforms(aspect);
 	graphics::writeBuffer(scene_uniforms, &scene_data, sizeof(scene_data));
+	writeLights();
 
 	const VkCommandBufferBeginInfo command_buffer_begin = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

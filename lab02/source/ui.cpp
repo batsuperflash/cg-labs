@@ -161,6 +161,67 @@ void drawLightingSection(scene::Scene& scene) {
 	ImGui::TextDisabled("Yaw and pitch give the direction the light travels");
 }
 
+void drawPointLightsSection(scene::Scene& scene) {
+	if (!ImGui::CollapsingHeader("Point lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	auto drawSwatch = [](const glm::vec3& color) {
+		const float size = ImGui::GetFrameHeight();
+		ImGui::ColorButton("##swatch", ImVec4(color.r, color.g, color.b, 1.0f), ImGuiColorEditFlags_NoTooltip,
+		                   ImVec2(size, size));
+		ImGui::SameLine();
+	};
+
+	const int count = int(scene.point_lights.size());
+
+	if (count > 0) {
+		char preview[32];
+		std::snprintf(preview, sizeof(preview), "Point light %d", scene.selected_point + 1);
+		drawSwatch(scene.point_lights[scene.selected_point].color);
+		if (ImGui::BeginCombo("Selected##point", preview)) {
+			for (int i = 0; i < count; ++i) {
+				char label[32];
+				std::snprintf(label, sizeof(label), "Point light %d", i + 1);
+
+				ImGui::PushID(i);
+				drawSwatch(scene.point_lights[i].color);
+				if (ImGui::Selectable(label, scene.selected_point == i)) {
+					scene.selected_point = i;
+				}
+				ImGui::PopID();
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	ImGui::BeginDisabled(count >= scene::max_point_lights);
+	if (ImGui::Button("Add##point")) {
+		scene::addPointLight(scene);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SameLine();
+	ImGui::BeginDisabled(count == 0);
+	if (ImGui::Button("Remove##point")) {
+		scene::removeSelectedPointLight(scene);
+	}
+	ImGui::EndDisabled();
+
+	ImGui::SameLine();
+	ImGui::TextDisabled("%d of %d", count, scene::max_point_lights);
+
+	if (scene.point_lights.empty()) {
+		return;
+	}
+
+	scene::PointLight& light = scene.point_lights[scene.selected_point];
+	ImGui::DragFloat3("Position##point", &light.position.x, 0.05f, -20.0f, 20.0f, "%.2f");
+	ImGui::ColorEdit3("Color##point", &light.color.x);
+	ImGui::SliderFloat("Intensity##point", &light.intensity, 0.0f, 200.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+	ImGui::TextDisabled("Brightness falls off as intensity / distance^2");
+}
+
 void drawFloorSection(scene::Floor& floor) {
 	if (!ImGui::CollapsingHeader("Floor")) {
 		return;
@@ -182,6 +243,7 @@ void drawSceneWindow(scene::Scene& scene) {
 	ImGui::Text("%.0f FPS", ImGui::GetIO().Framerate);
 	drawCameraSection(scene.camera);
 	drawLightingSection(scene);
+	drawPointLightsSection(scene);
 	drawFloorSection(scene.floor);
 	drawObjectsSection(scene);
 
