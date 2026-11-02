@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 
@@ -32,7 +33,7 @@ struct SceneUniforms {
 	glm::vec4 ambient;       // rgb = цвет * интенсивность
 	glm::vec4 sun_direction; // xyz = куда идёт свет, w = 1, если включён
 	glm::vec4 sun_radiance;  // rgb = цвет * интенсивность
-	glm::uvec4 counts;       // x = число точечных источников
+	glm::uvec4 counts;       // x = число точечных источников, y = число прожекторов
 };
 
 static_assert(sizeof(SceneUniforms) == 208);
@@ -47,6 +48,15 @@ struct PointLightGpu {
 };
 
 static_assert(sizeof(PointLightGpu) == 32);
+
+struct SpotLightGpu {
+	glm::vec4 position;
+	glm::vec4 direction;
+	glm::vec4 radiance; // rgb = цвет * интенсивность
+	glm::vec4 cone;     // x = cos(внутренний угол), y = cos(внешний угол)
+};
+
+static_assert(sizeof(SpotLightGpu) == 64);
 
 // Раскладка std140 должна совпадать с блоком ModelUniforms. Это данные одной модели: набор дескрипторов на каждое рисование.
 struct ModelUniforms {
@@ -79,6 +89,7 @@ MeshGpu plane_mesh;
 
 graphics::Buffer scene_uniforms;
 graphics::Buffer point_lights_buffer; // место под max_point_lights элементов, используется столько, сколько источников в сцене
+graphics::Buffer spot_lights_buffer;
 
 VkDescriptorSetLayout vk_scene_set_layout;
 VkDescriptorSetLayout vk_model_set_layout;
@@ -173,7 +184,8 @@ bool createResources() {
 		return false;
 	}
 
-	// Набор для сцены: слот 0 — uniform buffer со SceneUniforms, слот 1 — storage buffer с точечными источниками.
+	// Набор для сцены: слот 0 — uniform buffer со SceneUniforms, слоты 1 и 2 — storage buffers с точечными
+	// и прожекторными источниками.
 	const VkDescriptorSetLayoutBinding scene_bindings[] = {
 		{
 			.binding = 0,
@@ -183,6 +195,12 @@ bool createResources() {
 		},
 		{
 			.binding = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		},
+		{
+			.binding = 2,
 			.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -274,10 +292,10 @@ bool createResources() {
 		return false;
 	}
 
-	// Один набор для сцены (uniform buffer и storage buffer) и по набору на каждое рисование модели (uniform buffer).
+	// Один набор для сцены (uniform buffer и два storage buffers) и по набору на каждое рисование модели (uniform buffer).
 	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1 + max_draws },
-		{ .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1 },
+		{ .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2 },
 	};
 
 	const VkDescriptorPoolCreateInfo descriptor_pool = {
@@ -294,14 +312,17 @@ bool createResources() {
 	}
 
 	constexpr VkDeviceSize point_lights_size = scene::max_point_lights * sizeof(PointLightGpu);
+	constexpr VkDeviceSize spot_lights_size = scene::max_spot_lights * sizeof(SpotLightGpu);
 
 	if (!graphics::createBuffer(sizeof(SceneUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, scene_uniforms) ||
 	    !graphics::createBuffer(point_lights_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, point_lights_buffer) ||
+	    !graphics::createBuffer(spot_lights_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, spot_lights_buffer) ||
 	    !allocateDescriptorSet(vk_scene_set_layout, vk_scene_set)) {
 		return false;
 	}
 	writeBufferDescriptor(vk_scene_set, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, scene_uniforms, sizeof(SceneUniforms));
 	writeBufferDescriptor(vk_scene_set, 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, point_lights_buffer, point_lights_size);
+	writeBufferDescriptor(vk_scene_set, 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, spot_lights_buffer, spot_lights_size);
 
 	// Ресурсы создаются сразу для всех рисований, поэтому во время работы ничего не создаётся и не удаляется.
 	for (ModelGpu& model : models_gpu) {
@@ -334,6 +355,7 @@ void shutdown() {
 	for (ModelGpu& model : models_gpu) {
 		graphics::destroyBuffer(model.uniforms);
 	}
+	graphics::destroyBuffer(spot_lights_buffer);
 	graphics::destroyBuffer(point_lights_buffer);
 	graphics::destroyBuffer(scene_uniforms);
 	vkDestroyDescriptorPool(context.device, vk_descriptor_pool, nullptr);
@@ -408,7 +430,7 @@ SceneUniforms makeSceneUniforms(float aspect) {
 		.sun_direction = glm::vec4(scene::directionFromAngles(sun.yaw_degrees, sun.pitch_degrees),
 		                           sun.enabled ? 1.0f : 0.0f),
 		.sun_radiance = glm::vec4(sun.color * sun.intensity, 1.0f),
-		.counts = glm::uvec4(uint32_t(world.point_lights.size()), 0u, 0u, 0u),
+		.counts = glm::uvec4(uint32_t(world.point_lights.size()), uint32_t(world.spot_lights.size()), 0u, 0u),
 	};
 }
 
@@ -422,6 +444,21 @@ void writeLights() {
 
 	if (!world.point_lights.empty()) {
 		graphics::writeBuffer(point_lights_buffer, point_lights.data(), world.point_lights.size() * sizeof(PointLightGpu));
+	}
+
+	std::array<SpotLightGpu, scene::max_spot_lights> spot_lights;
+	for (size_t i = 0; i < world.spot_lights.size(); ++i) {
+		const scene::SpotLight& light = world.spot_lights[i];
+		spot_lights[i] = {
+			glm::vec4(light.position, 1.0f),
+			glm::vec4(scene::directionFromAngles(light.yaw_degrees, light.pitch_degrees), 0.0f),
+			glm::vec4(light.color * light.intensity, 1.0f),
+			glm::vec4(std::cos(glm::radians(light.inner_degrees)), std::cos(glm::radians(light.outer_degrees)), 0.0f, 0.0f),
+		};
+	}
+
+	if (!world.spot_lights.empty()) {
+		graphics::writeBuffer(spot_lights_buffer, spot_lights.data(), world.spot_lights.size() * sizeof(SpotLightGpu));
 	}
 }
 

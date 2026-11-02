@@ -179,6 +179,33 @@ void removeSelectedPointLight(Scene& scene) {
 	scene.selected_point = std::clamp(scene.selected_point, 0, std::max(int(scene.point_lights.size()) - 1, 0));
 }
 
+SpotLight makeSpotLight(int index) {
+	constexpr int palette_size = sizeof(light_palette) / sizeof(light_palette[0]);
+
+	SpotLight light;
+	light.color = index == 0 ? light.color : light_palette[(index + 2) % palette_size];
+	light.position = glm::vec3(-4.0f + 2.0f * float(index % 5), 6.0f, 4.0f);
+	return light;
+}
+
+void addSpotLight(Scene& scene) {
+	if (int(scene.spot_lights.size()) >= max_spot_lights) {
+		return;
+	}
+
+	scene.spot_lights.push_back(makeSpotLight(int(scene.spot_lights.size())));
+	scene.selected_spot = int(scene.spot_lights.size()) - 1;
+}
+
+void removeSelectedSpotLight(Scene& scene) {
+	if (scene.spot_lights.empty()) {
+		return;
+	}
+
+	scene.spot_lights.erase(scene.spot_lights.begin() + scene.selected_spot);
+	scene.selected_spot = std::clamp(scene.selected_spot, 0, std::max(int(scene.spot_lights.size()) - 1, 0));
+}
+
 Scene makeDefaultScene() {
 	Scene scene;
 	scene.object_count = 3;
@@ -191,6 +218,7 @@ Scene makeDefaultScene() {
 		{ glm::vec3(-5.0f, 0.5f, 2.0f), light_palette[0], 25.0f },
 		{ glm::vec3(5.0f, -0.5f, 1.0f), light_palette[1], 25.0f },
 	};
+	scene.spot_lights = { SpotLight() };
 	return scene;
 }
 

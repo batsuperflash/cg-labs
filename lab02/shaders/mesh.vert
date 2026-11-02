@@ -8,7 +8,7 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
 	vec4 ambient;         // rgb = цвет * интенсивность
 	vec4 sun_direction;   // xyz = куда идёт свет, w = 1, если включён
 	vec4 sun_radiance;    // rgb = цвет * интенсивность
-	uvec4 counts;         // x = число точечных источников
+	uvec4 counts;         // x = число точечных источников, y = число прожекторов
 } scene;
 
 // Раскладка std140 должна совпадать с ModelUniforms в application.cpp.

@@ -1,6 +1,8 @@
 #include "ui.hpp"
 
+#include <algorithm>
 #include <cstdio>
+#include <vector>
 
 #include <imgui.h>
 
@@ -161,11 +163,10 @@ void drawLightingSection(scene::Scene& scene) {
 	ImGui::TextDisabled("Yaw and pitch give the direction the light travels");
 }
 
-void drawPointLightsSection(scene::Scene& scene) {
-	if (!ImGui::CollapsingHeader("Point lights", ImGuiTreeNodeFlags_DefaultOpen)) {
-		return;
-	}
-
+// Список источников одного вида: выбор в выпадающем списке, Add и Remove. Возвращает выбранный источник или nullptr.
+template <typename Light>
+Light* drawLightList(const char* name, std::vector<Light>& lights, int& selected, int max_count, void (*add)(scene::Scene&),
+                     void (*remove)(scene::Scene&), scene::Scene& scene) {
 	auto drawSwatch = [](const glm::vec3& color) {
 		const float size = ImGui::GetFrameHeight();
 		ImGui::ColorButton("##swatch", ImVec4(color.r, color.g, color.b, 1.0f), ImGuiColorEditFlags_NoTooltip,
@@ -173,21 +174,21 @@ void drawPointLightsSection(scene::Scene& scene) {
 		ImGui::SameLine();
 	};
 
-	const int count = int(scene.point_lights.size());
+	const int count = int(lights.size());
 
 	if (count > 0) {
-		char preview[32];
-		std::snprintf(preview, sizeof(preview), "Point light %d", scene.selected_point + 1);
-		drawSwatch(scene.point_lights[scene.selected_point].color);
-		if (ImGui::BeginCombo("Selected##point", preview)) {
+		char preview[48];
+		std::snprintf(preview, sizeof(preview), "%s %d", name, selected + 1);
+		drawSwatch(lights[selected].color);
+		if (ImGui::BeginCombo("Selected", preview)) {
 			for (int i = 0; i < count; ++i) {
-				char label[32];
-				std::snprintf(label, sizeof(label), "Point light %d", i + 1);
+				char label[48];
+				std::snprintf(label, sizeof(label), "%s %d", name, i + 1);
 
 				ImGui::PushID(i);
-				drawSwatch(scene.point_lights[i].color);
-				if (ImGui::Selectable(label, scene.selected_point == i)) {
-					scene.selected_point = i;
+				drawSwatch(lights[i].color);
+				if (ImGui::Selectable(label, selected == i)) {
+					selected = i;
 				}
 				ImGui::PopID();
 			}
@@ -195,31 +196,66 @@ void drawPointLightsSection(scene::Scene& scene) {
 		}
 	}
 
-	ImGui::BeginDisabled(count >= scene::max_point_lights);
-	if (ImGui::Button("Add##point")) {
-		scene::addPointLight(scene);
+	ImGui::BeginDisabled(count >= max_count);
+	if (ImGui::Button("Add")) {
+		add(scene);
 	}
 	ImGui::EndDisabled();
 
 	ImGui::SameLine();
 	ImGui::BeginDisabled(count == 0);
-	if (ImGui::Button("Remove##point")) {
-		scene::removeSelectedPointLight(scene);
+	if (ImGui::Button("Remove")) {
+		remove(scene);
 	}
 	ImGui::EndDisabled();
 
 	ImGui::SameLine();
-	ImGui::TextDisabled("%d of %d", count, scene::max_point_lights);
+	ImGui::TextDisabled("%d of %d", count, max_count);
 
-	if (scene.point_lights.empty()) {
+	return lights.empty() ? nullptr : &lights[selected];
+}
+
+void drawPointLightsSection(scene::Scene& scene) {
+	if (!ImGui::CollapsingHeader("Point lights", ImGuiTreeNodeFlags_DefaultOpen)) {
 		return;
 	}
 
-	scene::PointLight& light = scene.point_lights[scene.selected_point];
-	ImGui::DragFloat3("Position##point", &light.position.x, 0.05f, -20.0f, 20.0f, "%.2f");
-	ImGui::ColorEdit3("Color##point", &light.color.x);
-	ImGui::SliderFloat("Intensity##point", &light.intensity, 0.0f, 200.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
-	ImGui::TextDisabled("Brightness falls off as intensity / distance^2");
+	ImGui::PushID("point");
+	scene::PointLight* light = drawLightList("Point light", scene.point_lights, scene.selected_point,
+	                                         scene::max_point_lights, scene::addPointLight,
+	                                         scene::removeSelectedPointLight, scene);
+	if (light != nullptr) {
+		ImGui::DragFloat3("Position", &light->position.x, 0.05f, -20.0f, 20.0f, "%.2f");
+		ImGui::ColorEdit3("Color", &light->color.x);
+		ImGui::SliderFloat("Intensity", &light->intensity, 0.0f, 200.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+		ImGui::TextDisabled("Brightness falls off as intensity / distance^2");
+	}
+	ImGui::PopID();
+}
+
+void drawSpotLightsSection(scene::Scene& scene) {
+	if (!ImGui::CollapsingHeader("Spot lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	ImGui::PushID("spot");
+	scene::SpotLight* light = drawLightList("Spot light", scene.spot_lights, scene.selected_spot,
+	                                        scene::max_spot_lights, scene::addSpotLight,
+	                                        scene::removeSelectedSpotLight, scene);
+	if (light != nullptr) {
+		ImGui::DragFloat3("Position", &light->position.x, 0.05f, -20.0f, 20.0f, "%.2f");
+		ImGui::SliderFloat("Yaw", &light->yaw_degrees, -180.0f, 180.0f, "%.0f deg");
+		ImGui::SliderFloat("Pitch", &light->pitch_degrees, -89.0f, 89.0f, "%.0f deg");
+		ImGui::ColorEdit3("Color", &light->color.x);
+		ImGui::SliderFloat("Intensity", &light->intensity, 0.0f, 400.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+
+		// Внутренний угол не может быть больше внешнего.
+		ImGui::SliderFloat("Inner angle", &light->inner_degrees, 0.0f, 85.0f, "%.1f deg");
+		ImGui::SliderFloat("Outer angle", &light->outer_degrees, 0.0f, 89.0f, "%.1f deg");
+		light->inner_degrees = std::min(light->inner_degrees, light->outer_degrees);
+		ImGui::TextDisabled("Full light inside the inner cone, fades out up to the outer one");
+	}
+	ImGui::PopID();
 }
 
 void drawFloorSection(scene::Floor& floor) {
@@ -244,6 +280,7 @@ void drawSceneWindow(scene::Scene& scene) {
 	drawCameraSection(scene.camera);
 	drawLightingSection(scene);
 	drawPointLightsSection(scene);
+	drawSpotLightsSection(scene);
 	drawFloorSection(scene.floor);
 	drawObjectsSection(scene);
 

@@ -357,6 +357,33 @@ void testPointLightList() {
 	check(state.point_lights.empty() && state.selected_point == 0, "all point lights can be removed");
 }
 
+void testSpotLightList() {
+	scene::Scene state;
+	check(state.spot_lights.empty(), "a scene starts without spot lights");
+
+	for (int i = 0; i < 20; ++i) {
+		scene::addSpotLight(state);
+	}
+	check(int(state.spot_lights.size()) == scene::max_spot_lights, "no more than 16 spot lights");
+	check(state.selected_spot == scene::max_spot_lights - 1, "added spot light becomes selected");
+
+	for (const scene::SpotLight& light : state.spot_lights) {
+		check(light.inner_degrees <= light.outer_degrees && light.outer_degrees < 90.0f,
+		      "inner angle does not exceed the outer one");
+	}
+
+	state.selected_spot = 1;
+	const glm::vec3 next_position = state.spot_lights[2].position;
+	scene::removeSelectedSpotLight(state);
+	check(state.spot_lights[1].position == next_position, "removal shifts the following spot lights");
+
+	while (!state.spot_lights.empty()) {
+		state.selected_spot = int(state.spot_lights.size()) - 1;
+		scene::removeSelectedSpotLight(state);
+	}
+	check(state.selected_spot == 0, "all spot lights can be removed");
+}
+
 void testDefaultScene() {
 	const scene::Scene state = scene::makeDefaultScene();
 	check(state.object_count >= 1 && state.object_count <= scene::max_objects, "default scene has objects");
@@ -402,6 +429,7 @@ int main() {
 	testNormalMatrix();
 	testCamera();
 	testPointLightList();
+	testSpotLightList();
 	testDefaultScene();
 	testTrajectoryAndAnimation();
 	testObjectMatrices();

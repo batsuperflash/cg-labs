@@ -29,6 +29,17 @@ layout(std430, set = 0, binding = 1) readonly buffer PointLights {
 	PointLight lights[];
 } point_lights;
 
+struct SpotLight {
+	vec4 position;  // xyz
+	vec4 direction; // xyz = куда светит прожектор, единичный вектор
+	vec4 radiance;  // rgb = цвет * интенсивность
+	vec4 cone;      // x = cos(внутренний угол), y = cos(внешний угол)
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer SpotLights {
+	SpotLight lights[];
+} spot_lights;
+
 layout(location = 0) in vec3 in_world_position;
 layout(location = 1) in vec3 in_world_normal;
 
@@ -62,6 +73,22 @@ void main() {
 
 		// Закон обратных квадратов: яркость убывает как 1 / r².
 		color += blinnPhong(N, V, to_light * inversesqrt(distance_squared), light.radiance.rgb / distance_squared);
+	}
+
+	for (uint i = 0u; i < scene.counts.y; ++i) {
+		SpotLight light = spot_lights.lights[i];
+
+		vec3 to_light = light.position.xyz - in_world_position;
+		float distance_squared = max(dot(to_light, to_light), 1e-4);
+		vec3 L = to_light * inversesqrt(distance_squared);
+
+		// Косинус угла между осью прожектора и направлением от него на точку. Внутри внутреннего конуса
+		// множитель равен 1, за внешним конусом 0, между ними плавно (smoothstep) меняется.
+		float cos_angle = dot(-L, light.direction.xyz);
+		float t = clamp((cos_angle - light.cone.y) / max(light.cone.x - light.cone.y, 1e-4), 0.0, 1.0);
+		float edge = t * t * (3.0 - 2.0 * t);
+
+		color += blinnPhong(N, V, L, light.radiance.rgb * (edge / distance_squared));
 	}
 
 	out_color = vec4(color, 1.0);

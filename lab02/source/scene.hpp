@@ -74,7 +74,7 @@ struct Floor {
 // Рассеянный свет: одинаково освещает всё, чего не касается прямой свет.
 struct AmbientLight {
 	glm::vec3 color = glm::vec3(1.0f);
-	float intensity = 0.15f;
+	float intensity = 0.08f;
 };
 
 // Направленный свет, как от Солнца: одно направление для всей сцены, затухания нет.
@@ -84,7 +84,7 @@ struct DirectionalLight {
 	float yaw_degrees = -35.0f;
 	float pitch_degrees = -45.0f;
 	glm::vec3 color = glm::vec3(1.0f);
-	float intensity = 1.0f;
+	float intensity = 0.6f;
 };
 
 // Точечный источник: светит во все стороны из одной точки, яркость убывает как 1 / r².
@@ -94,8 +94,22 @@ struct PointLight {
 	float intensity = 20.0f;
 };
 
+// Прожектор: точечный источник, который светит только внутри конуса. Направление задаётся теми же углами,
+// что и у камеры. Углы отсчитываются от оси конуса: внутри inner свет полный, между inner и outer плавно
+// затухает до нуля, за пределами outer света нет. Если углы равны, край резкий.
+struct SpotLight {
+	glm::vec3 position = glm::vec3(0.0f, 6.0f, 4.0f);
+	float yaw_degrees = 0.0f;
+	float pitch_degrees = -56.0f;
+	glm::vec3 color = glm::vec3(1.0f, 0.95f, 0.8f);
+	float intensity = 80.0f;
+	float inner_degrees = 12.0f;
+	float outer_degrees = 25.0f;
+};
+
 constexpr int max_objects = 8;
 constexpr int max_point_lights = 16;
+constexpr int max_spot_lights = 16;
 
 struct Scene {
 	Camera camera;
@@ -107,6 +121,8 @@ struct Scene {
 	int selected = 0;
 	std::vector<PointLight> point_lights;
 	int selected_point = 0;
+	std::vector<SpotLight> spot_lights;
+	int selected_spot = 0;
 };
 
 // Единичный вектор по углам: yaw = 0, pitch = 0 даёт (0, 0, -1), положительный pitch поднимает вектор вверх.
@@ -143,9 +159,14 @@ void addObject(Scene& scene);
 void removeSelected(Scene& scene);
 
 // Новый источник получает свой цвет и стартует рядом с центром сцены.
-PointLight makePointLight(int index);
 void addPointLight(Scene& scene);
 void removeSelectedPointLight(Scene& scene);
+
+PointLight makePointLight(int index);
+
+SpotLight makeSpotLight(int index);
+void addSpotLight(Scene& scene);
+void removeSelectedSpotLight(Scene& scene);
 
 // Начальная сцена: несколько объектов на траекториях и пол.
 Scene makeDefaultScene();
