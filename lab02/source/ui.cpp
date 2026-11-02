@@ -253,7 +253,7 @@ void drawSpotLightsSection(scene::Scene& scene) {
 		ImGui::SliderFloat("Inner angle", &light->inner_degrees, 0.0f, 85.0f, "%.1f deg");
 		ImGui::SliderFloat("Outer angle", &light->outer_degrees, 0.0f, 89.0f, "%.1f deg");
 		light->inner_degrees = std::min(light->inner_degrees, light->outer_degrees);
-		ImGui::TextDisabled("Full light inside the inner cone, fades out up to the outer one");
+		ImGui::TextDisabled("Fades out between the inner and outer angle");
 	}
 	ImGui::PopID();
 }
