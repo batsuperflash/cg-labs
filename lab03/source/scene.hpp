@@ -62,6 +62,7 @@ struct Object {
 	Transform transform;
 	Animation animation;
 	Material material;
+	bool animated_sampling = false; // нетривиальное сэмплирование текстуры: несколько образцов, зависящих от времени
 };
 
 // Пол под объектами: квадрат в плоскости y = height, на нём хорошо видны свет и блики.

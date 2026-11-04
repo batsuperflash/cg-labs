@@ -90,6 +90,17 @@ struct MaterialGpu {
 	VkDescriptorSet descriptor_set;
 };
 
+// Push-константы: данные, которые меняются между рисованиями и передаются прямо в командах, без буферов.
+// Здесь управление нетривиальным сэмплированием: время для анимации и флаги. Раскладка совпадает с PushConstants в mesh.frag.
+struct PushConstants {
+	float time;     // секунды с запуска программы
+	uint32_t flags;
+};
+
+static_assert(sizeof(PushConstants) == 8);
+
+constexpr uint32_t flag_animated_sampling = 1u << 0;
+
 // Сколько материалов можно загрузить, считая встроенный «plain».
 constexpr uint32_t max_materials = 32;
 
@@ -125,6 +136,7 @@ std::vector<ui::MaterialEntry> material_entries;
 
 scene::Scene world = scene::makeDefaultScene();
 double previous_time = -1.0;
+float shader_time = 0.0f;
 
 // Если задана переменная окружения LAB_EXIT_AFTER_FRAMES, программа закрывается сама
 // после указанного числа кадров. Нужно для автоматических проверок.
@@ -363,10 +375,19 @@ bool createResources() {
 	// Номер набора в шейдере (set = 0 или 1) — это позиция его layout в этом массиве.
 	const VkDescriptorSetLayout set_layouts[] = { vk_scene_set_layout, vk_model_set_layout, vk_material_set_layout };
 
+	// Push-константы читает только фрагментный шейдер.
+	const VkPushConstantRange push_constant_range = {
+		.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		.offset = 0,
+		.size = sizeof(PushConstants),
+	};
+
 	const VkPipelineLayoutCreateInfo pipeline_layout = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.setLayoutCount = sizeof(set_layouts) / sizeof(set_layouts[0]),
 		.pSetLayouts = set_layouts,
+		.pushConstantRangeCount = 1,
+		.pPushConstantRanges = &push_constant_range,
 	};
 
 	if (vkCreatePipelineLayout(context.device, &pipeline_layout, nullptr,
@@ -568,6 +589,7 @@ void updateCamera(float dt) {
 void update(double time) {
 	const float dt = previous_time < 0.0 ? 0.0f : float(std::min(time - previous_time, 0.1));
 	previous_time = time;
+	shader_time = float(time);
 
 	updateCamera(dt);
 
@@ -646,9 +668,13 @@ ModelUniforms makeModelUniforms(const glm::mat4& model, const glm::mat4& normal_
 // а при привязке единственного набора дескрипторов задаётся смещение к этому элементу.
 // prepare() уже дождался завершения предыдущего кадра, поэтому буфер можно перезаписывать.
 void drawModel(VkCommandBuffer command_buffer, uint32_t& next_slot, const MeshGpu& mesh, const ModelUniforms& uniforms,
-               int material = 0) {
+               int material = 0, uint32_t flags = 0) {
 	const uint32_t dynamic_offset = uint32_t(next_slot++ * model_stride);
 	graphics::writeBuffer(model_uniforms, &uniforms, sizeof(uniforms), dynamic_offset);
+
+	// Флаги и время идут в push-константах: включить сэмплирование для одной модели не нужно менять её данные в буфере.
+	const PushConstants push = { shader_time, flags };
+	vkCmdPushConstants(command_buffer, vk_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
 
 	const VkDeviceSize vertex_offset = 0;
 	vkCmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertices.buffer, &vertex_offset);
@@ -725,7 +751,7 @@ void render(const graphics::internal::FrameData& fd) {
 		const scene::Object& object = world.objects[i];
 		drawModel(fd.command_buffer, next_slot, dodecahedron_mesh,
 		          makeModelUniforms(scene::modelMatrix(object), scene::normalMatrix(object), object.material),
-		          object.material.texture);
+		          object.material.texture, object.animated_sampling ? flag_animated_sampling : 0u);
 	}
 
 	if (world.floor.visible) {

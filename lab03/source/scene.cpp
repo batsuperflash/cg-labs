@@ -217,6 +217,9 @@ Scene makeDefaultScene() {
 		scene.objects[i].animation.offset = two_pi * float(i) / float(scene.object_count);
 	}
 
+	// Нетривиальное сэмплирование включено у одного объекта.
+	scene.objects[1].animated_sampling = true;
+
 	scene.point_lights = {
 		{ glm::vec3(-5.0f, 0.5f, 2.0f), light_palette[0], 25.0f },
 		{ glm::vec3(5.0f, -0.5f, 1.0f), light_palette[1], 25.0f },

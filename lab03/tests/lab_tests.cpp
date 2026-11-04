@@ -567,6 +567,19 @@ void testDefaultScene() {
 	check(state.sun.enabled && state.sun.intensity > 0.0f, "default scene is lit by the directional light");
 }
 
+void testAnimatedSampling() {
+	const scene::Scene state = scene::makeDefaultScene();
+	int animated = 0;
+	for (int i = 0; i < state.object_count; ++i) {
+		animated += state.objects[i].animated_sampling ? 1 : 0;
+	}
+	check(animated == 1, "exactly one object of the default scene uses animated sampling");
+
+	scene::Scene added;
+	scene::addObject(added);
+	check(!added.objects[1].animated_sampling, "new objects start with plain sampling");
+}
+
 void testObjectList() {
 	scene::Scene state;
 	for (int i = 0; i < 10; ++i) {
@@ -617,6 +630,7 @@ int main() {
 	testTrajectoryAndAnimation();
 	testObjectMatrices();
 	testObjectList();
+	testAnimatedSampling();
 
 	std::printf("%d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

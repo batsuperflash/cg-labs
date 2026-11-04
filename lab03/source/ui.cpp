@@ -161,6 +161,15 @@ void drawMaterialSection(scene::Material& material, const char* title, std::span
 	ImGui::SliderFloat("Shininess", &material.shininess, 1.0f, 256.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 }
 
+void drawSamplingSection(scene::Object& object) {
+	if (!ImGui::CollapsingHeader("Texture sampling", ImGuiTreeNodeFlags_DefaultOpen)) {
+		return;
+	}
+
+	ImGui::Checkbox("Animated sampling", &object.animated_sampling);
+	ImGui::TextDisabled("Three samples of the texture with moving coordinates, hue shifts over time");
+}
+
 void drawLightingSection(scene::Scene& scene) {
 	if (!ImGui::CollapsingHeader("Ambient & directional light", ImGuiTreeNodeFlags_DefaultOpen)) {
 		return;
@@ -320,6 +329,7 @@ void drawSceneWindow(scene::Scene& scene, std::span<const MaterialEntry> materia
 
 	scene::Object& object = scene.objects[scene.selected];
 	drawMaterialSection(object.material, "Material", materials);
+	drawSamplingSection(object);
 	drawTransformSection(object.transform);
 	drawAnimationSection(object.animation);
 
