@@ -405,19 +405,24 @@ void testImages() {
 }
 
 void testMaterials() {
-	// Материалы ищутся по суффиксу _albedo; порядок файлов в папке на результат не влияет.
+	// Материалы ищутся по суффиксам _albedo, _specular и _emissive; порядок файлов в папке на результат не влияет.
 	const std::filesystem::path directory = std::filesystem::temp_directory_path() / "lab03_materials_test";
 	std::filesystem::remove_all(directory);
 	std::filesystem::create_directories(directory);
-	for (const char* name : { "wood_albedo.png", "brick_albedo.jpg", "notes.txt", "stray_specular.png", "_albedo.png" }) {
+	for (const char* name : { "wood_albedo.png", "wood_specular.png", "brick_albedo.jpg", "brick_emissive.png", "notes.txt",
+	                          "stray_specular.png", "_albedo.png" }) {
 		std::ofstream(directory / name).put('x');
 	}
 
 	const std::vector<materials::Files> found = materials::discover(directory);
-	check(found.size() == 2, "only files with the _albedo suffix and a name make a material");
+	check(found.size() == 2, "maps without an albedo texture and files without a name make no material");
 	if (found.size() == 2) {
 		check(found[0].name == "brick" && found[1].name == "wood", "materials are sorted by name");
 		check(found[0].albedo.filename() == "brick_albedo.jpg", "any image extension is accepted");
+		check(found[0].specular.empty() && found[0].emissive.filename() == "brick_emissive.png",
+		      "emissive map is attached to its material");
+		check(found[1].specular.filename() == "wood_specular.png" && found[1].emissive.empty(),
+		      "specular map is attached to its material and a missing map stays empty");
 	}
 	std::filesystem::remove_all(directory);
 
@@ -426,9 +431,40 @@ void testMaterials() {
 	// Материалы, которые лежат в репозитории.
 	const std::vector<materials::Files> shipped = materials::discover("textures");
 	check(shipped.size() >= 2, "the repository ships several textures");
+	bool has_specular = false;
+	bool has_emissive = false;
 	for (const materials::Files& files : shipped) {
 		image::Image albedo;
 		check(image::load(files.albedo, albedo) && albedo.width > 0, "every shipped albedo texture loads");
+
+		// Карты блика и свечения лежат в тех же текстурных координатах, поэтому размеры совпадают с альбедо.
+		for (const std::filesystem::path& map : { files.specular, files.emissive }) {
+			if (map.empty()) {
+				continue;
+			}
+			image::Image extra;
+			check(image::load(map, extra) && extra.width == albedo.width && extra.height == albedo.height,
+			      "specular and emissive maps have the size of the albedo texture");
+		}
+		has_specular = has_specular || !files.specular.empty();
+		has_emissive = has_emissive || !files.emissive.empty();
+	}
+	check(has_specular && has_emissive, "the repository ships specular and emissive maps");
+
+	// Карта свечения лавы: тёмная почти везде и яркая в трещинах, иначе «свечения в темноте» не будет.
+	image::Image lava_emissive;
+	if (image::load("textures/lava_emissive.png", lava_emissive)) {
+		size_t dark = 0;
+		size_t bright = 0;
+		for (size_t i = 0; i < lava_emissive.pixels.size(); i += 4) {
+			const int red = lava_emissive.pixels[i];
+			dark += red < 16 ? 1 : 0;
+			bright += red > 200 ? 1 : 0;
+		}
+		const size_t count = lava_emissive.pixels.size() / 4;
+		check(dark > count / 4 && bright > count / 50, "lava emissive map has dark areas and bright cracks");
+	} else {
+		check(false, "lava emissive map loads");
 	}
 }
 

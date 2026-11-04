@@ -18,7 +18,7 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	mat4 normal_matrix;
 	vec4 albedo;         // множитель цвета текстуры (оттенок)
 	vec4 specular;       // rgb = цвет блика, w = коэффициент блика
-	vec4 texture_params; // xy = во сколько раз повторить текстуру по u и v
+	vec4 texture_params; // xy = во сколько раз повторить текстуру по u и v, z = множитель карты свечения
 } object;
 
 layout(location = 0) in vec3 in_position;

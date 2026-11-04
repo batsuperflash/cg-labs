@@ -7,7 +7,7 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	mat4 normal_matrix;
 	vec4 albedo;
 	vec4 specular;
-	vec4 texture_params;
+	vec4 texture_params; // xy = повторение текстуры, z = множитель свечения
 } object;
 
 layout(location = 0) in vec3 in_world_position;

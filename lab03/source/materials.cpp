@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <map>
 #include <string_view>
+#include <utility>
 
 namespace materials {
 
@@ -24,17 +25,24 @@ std::vector<Files> discover(const std::filesystem::path& directory) {
 		}
 
 		const std::string stem = entry.path().stem().string();
-		if (endsWith(stem, "_albedo")) {
-			const std::string name = stem.substr(0, stem.size() - std::string_view("_albedo").size());
-			found[name].name = name;
-			found[name].albedo = entry.path();
+		for (const auto& [suffix, member] : { std::pair{ std::string_view("_albedo"), &Files::albedo },
+		                                      std::pair{ std::string_view("_specular"), &Files::specular },
+		                                      std::pair{ std::string_view("_emissive"), &Files::emissive } }) {
+			if (endsWith(stem, suffix)) {
+				const std::string name = stem.substr(0, stem.size() - suffix.size());
+				found[name].name = name;
+				found[name].*member = entry.path();
+			}
 		}
 	}
 
 	// std::map уже хранит материалы по возрастанию имени, так что порядок не зависит от порядка файлов в папке.
+	// Карты блика и свечения без альбедо материала не создают.
 	std::vector<Files> result;
 	for (auto& [name, files] : found) {
-		result.push_back(std::move(files));
+		if (!files.albedo.empty()) {
+			result.push_back(std::move(files));
+		}
 	}
 	return result;
 }

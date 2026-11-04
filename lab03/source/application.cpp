@@ -70,7 +70,7 @@ struct ModelUniforms {
 	glm::mat4 normal_matrix;
 	glm::vec4 albedo;         // множитель цвета текстуры (оттенок)
 	glm::vec4 specular;       // rgb = цвет блика, w = коэффициент блика
-	glm::vec4 texture_params; // xy = во сколько раз повторить текстуру по u и v
+	glm::vec4 texture_params; // xy = во сколько раз повторить текстуру по u и v, z = множитель карты свечения
 };
 
 static_assert(sizeof(ModelUniforms) == 176);
@@ -86,7 +86,9 @@ struct MeshGpu {
 // Материал: набор текстур с собственным набором дескрипторов. Так материалы переключаются одной командой привязки.
 struct MaterialGpu {
 	std::string name;
-	graphics::Texture albedo;
+	graphics::Texture albedo;   // у «plain» пустая: вместо неё общая белая
+	graphics::Texture specular; // пустая, если у материала нет карты блика: тогда в наборе общая чёрная
+	graphics::Texture emissive; // пустая, если у материала нет карты свечения
 	VkDescriptorSet descriptor_set;
 };
 
@@ -131,6 +133,7 @@ VkDescriptorSet vk_model_set; // динамический uniform buffer со в
 
 VkSampler vk_sampler;
 graphics::Texture white_texture;           // служебная текстура из одного белого пикселя: цвет «plain» целиком из оттенка
+graphics::Texture black_texture;           // служебная текстура из одного чёрного пикселя вместо отсутствующих карт блика и свечения
 std::vector<MaterialGpu> materials_gpu;    // materials_gpu[0] — «plain», дальше материалы из папки textures
 std::vector<ui::MaterialEntry> material_entries;
 
@@ -239,27 +242,38 @@ bool allocateDescriptorSet(VkDescriptorSetLayout layout, VkDescriptorSet& set) {
 	return true;
 }
 
-// Создаёт материалы: встроенный «plain» с белой текстурой, затем по одному на каждый файл *_albedo.* из папки textures.
-// Файл, который не удалось прочитать, пропускается вместе с материалом.
+// Создаёт материалы: встроенный «plain» с белым альбедо, затем по одному на каждый файл *_albedo.* из папки textures.
+// Если у материала нет карты блика или свечения, вместо неё в набор кладётся служебная чёрная текстура:
+// блик умножается на ноль, а свечение прибавляет ноль, поэтому ни блеска, ни свечения не видно. Файл, который
+// не удалось прочитать, пропускается вместе с материалом.
 bool createMaterials() {
 	const image::Image white = image::solid(255, 255, 255);
-	if (!graphics::createTexture(white.pixels.data(), white.width, white.height, VK_FORMAT_R8G8B8A8_SRGB, white_texture)) {
+	const image::Image black = image::solid(0, 0, 0);
+	if (!graphics::createTexture(white.pixels.data(), white.width, white.height, VK_FORMAT_R8G8B8A8_SRGB, white_texture) ||
+	    !graphics::createTexture(black.pixels.data(), black.width, black.height, VK_FORMAT_R8G8B8A8_UNORM, black_texture)) {
 		return false;
 	}
 
-	auto addMaterial = [](const std::string& name, graphics::Texture albedo, const graphics::Texture& shown) {
-		MaterialGpu material = { name, albedo, VK_NULL_HANDLE };
+	// Записывает набор материала: пустая текстура заменяется служебной.
+	auto addMaterial = [](const std::string& name, const graphics::Texture& albedo, const graphics::Texture& specular,
+	                      const graphics::Texture& emissive) {
+		MaterialGpu material = { name, albedo, specular, emissive, VK_NULL_HANDLE };
 		if (!allocateDescriptorSet(vk_material_set_layout, material.descriptor_set)) {
 			graphics::destroyTexture(material.albedo);
+			graphics::destroyTexture(material.specular);
+			graphics::destroyTexture(material.emissive);
 			return false;
 		}
-		writeImageDescriptor(material.descriptor_set, 0, shown.view, vk_sampler);
+
+		writeImageDescriptor(material.descriptor_set, 0, (albedo.view != VK_NULL_HANDLE ? albedo : white_texture).view, vk_sampler);
+		writeImageDescriptor(material.descriptor_set, 1, (specular.view != VK_NULL_HANDLE ? specular : black_texture).view, vk_sampler);
+		writeImageDescriptor(material.descriptor_set, 2, (emissive.view != VK_NULL_HANDLE ? emissive : black_texture).view, vk_sampler);
 		materials_gpu.push_back(material);
-		material_entries.push_back({ name });
+		material_entries.push_back({ name, specular.view != VK_NULL_HANDLE, emissive.view != VK_NULL_HANDLE });
 		return true;
 	};
 
-	if (!addMaterial("plain", {}, white_texture)) {
+	if (!addMaterial("plain", {}, {}, {})) {
 		return false;
 	}
 
@@ -269,11 +283,20 @@ bool createMaterials() {
 			break;
 		}
 
+		// Цветные изображения хранятся в sRGB, карта блика — это данные, их читаем как есть.
 		graphics::Texture albedo;
-		if (!loadTexture(files.albedo.string().c_str(), VK_FORMAT_R8G8B8A8_SRGB, albedo)) {
+		graphics::Texture specular;
+		graphics::Texture emissive;
+		const bool loaded = loadTexture(files.albedo.string().c_str(), VK_FORMAT_R8G8B8A8_SRGB, albedo) &&
+		                    (files.specular.empty() || loadTexture(files.specular.string().c_str(), VK_FORMAT_R8G8B8A8_UNORM, specular)) &&
+		                    (files.emissive.empty() || loadTexture(files.emissive.string().c_str(), VK_FORMAT_R8G8B8A8_SRGB, emissive));
+		if (!loaded) {
+			graphics::destroyTexture(albedo);
+			graphics::destroyTexture(specular);
+			graphics::destroyTexture(emissive);
 			continue;
 		}
-		if (!addMaterial(files.name, albedo, albedo)) {
+		if (!addMaterial(files.name, albedo, specular, emissive)) {
 			return false;
 		}
 	}
@@ -334,10 +357,23 @@ bool createResources() {
 		},
 	};
 
-	// Набор для материала: слот 0 — текстура альбедо вместе с сэмплером. Свой набор у каждого материала.
+	// Набор для материала: слот 0 — альбедо, слот 1 — карта блика, слот 2 — карта свечения, каждая вместе с сэмплером.
+	// Свой набор у каждого материала.
 	const VkDescriptorSetLayoutBinding material_bindings[] = {
 		{
 			.binding = 0,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		},
+		{
+			.binding = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+		},
+		{
+			.binding = 2,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -454,12 +490,12 @@ bool createResources() {
 	}
 
 	// Набор сцены (uniform buffer и два storage buffers), набор моделей (динамический uniform buffer)
-	// и по набору на каждый материал (текстура с сэмплером).
+	// и по набору на каждый материал (три текстуры с сэмплером).
 	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1 },
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = 1 },
 		{ .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2 },
-		{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = max_materials },
+		{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 3 * max_materials },
 	};
 
 	const VkDescriptorPoolCreateInfo descriptor_pool = {
@@ -520,9 +556,9 @@ bool initialize() {
 
 	// Материалы известны только теперь, поэтому начальные текстуры назначаются здесь, по именам.
 	world.material_count = int(materials_gpu.size());
-	world.objects[0].material.texture = findMaterial("brick");
+	world.objects[0].material.texture = findMaterial("lava");
 	world.objects[1].material.texture = findMaterial("marble");
-	world.objects[2].material.texture = findMaterial("wood");
+	world.objects[2].material.texture = findMaterial("brick");
 	world.floor.material.texture = findMaterial("tiles");
 	return true;
 }
@@ -532,8 +568,11 @@ void shutdown() {
 	vkQueueWaitIdle(context.graphics_queue);
 
 	for (MaterialGpu& material : materials_gpu) {
+		graphics::destroyTexture(material.emissive);
+		graphics::destroyTexture(material.specular);
 		graphics::destroyTexture(material.albedo);
 	}
+	graphics::destroyTexture(black_texture);
 	graphics::destroyTexture(white_texture);
 	vkDestroySampler(context.device, vk_sampler, nullptr);
 	graphics::destroyBuffer(model_uniforms);
@@ -660,7 +699,7 @@ ModelUniforms makeModelUniforms(const glm::mat4& model, const glm::mat4& normal_
 		// без перевода, и только так цвет на экране совпадает с образцом.
 		.albedo = glm::vec4(material.albedo, 1.0f),
 		.specular = glm::vec4(material.specular_color, material.shininess),
-		.texture_params = glm::vec4(uv_scale, 0.0f, 0.0f),
+		.texture_params = glm::vec4(uv_scale, material.emissive_strength, 0.0f),
 	};
 }
 

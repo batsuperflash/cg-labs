@@ -16,11 +16,13 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	mat4 normal_matrix;
 	vec4 albedo;
 	vec4 specular;
-	vec4 texture_params;
+	vec4 texture_params; // xy = повторение текстуры, z = множитель карты свечения
 } object;
 
 // Текстуры материала: у каждого материала свой набор дескрипторов (set = 2), он выбирается при рисовании модели.
-layout(set = 2, binding = 0) uniform sampler2D albedo_map;
+layout(set = 2, binding = 0) uniform sampler2D albedo_map;   // основной цвет
+layout(set = 2, binding = 1) uniform sampler2D specular_map; // где и насколько поверхность блестит
+layout(set = 2, binding = 2) uniform sampler2D emissive_map; // что светится само, минуя освещение
 
 // Push-константы: время и флаги нетривиального сэмплирования. Раскладка совпадает с PushConstants в application.cpp.
 layout(push_constant) uniform PushConstants {
@@ -60,12 +62,12 @@ layout(location = 0) out vec4 out_color;
 
 // Модель Блинна-Фонга для одного источника: N — нормаль, V — на камеру, L — на источник,
 // radiance — приходящий свет (цвет * интенсивность, с учётом затухания).
-vec3 blinnPhong(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo) {
+vec3 blinnPhong(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, vec3 specular_color) {
 	float n_dot_l = max(dot(N, L), 0.0);
 	vec3 H = normalize(L + V);
 	float specular = n_dot_l > 0.0 ? pow(max(dot(N, H), 0.0), object.specular.w) : 0.0;
 
-	return (albedo * n_dot_l + object.specular.rgb * specular) * radiance;
+	return (albedo * n_dot_l + specular_color * specular) * radiance;
 }
 
 // Нетривиальное сэмплирование: одна и та же текстура читается три раза с разными координатами, а оттенок меняется со временем.
@@ -100,10 +102,13 @@ void main() {
 	vec3 texel = (push.flags & FLAG_ANIMATED_SAMPLING) != 0u ? sampleAnimated(in_uv, push.time) : texture(albedo_map, in_uv).rgb;
 	vec3 albedo = texel * object.albedo.rgb;
 
+	// Цвет блика: цвет из материала, умноженный на карту. Чёрный тексель гасит блик, и у материала без карты блика нет совсем.
+	vec3 specular_color = object.specular.rgb * texture(specular_map, in_uv).rgb;
+
 	vec3 color = albedo * scene.ambient.rgb;
 
 	if (scene.sun_direction.w > 0.5) {
-		color += blinnPhong(N, V, -scene.sun_direction.xyz, scene.sun_radiance.rgb, albedo);
+		color += blinnPhong(N, V, -scene.sun_direction.xyz, scene.sun_radiance.rgb, albedo, specular_color);
 	}
 
 	for (uint i = 0u; i < scene.counts.x; ++i) {
@@ -113,7 +118,7 @@ void main() {
 		float distance_squared = max(dot(to_light, to_light), 1e-4);
 
 		// Закон обратных квадратов: яркость убывает как 1 / r².
-		color += blinnPhong(N, V, to_light * inversesqrt(distance_squared), light.radiance.rgb / distance_squared, albedo);
+		color += blinnPhong(N, V, to_light * inversesqrt(distance_squared), light.radiance.rgb / distance_squared, albedo, specular_color);
 	}
 
 	for (uint i = 0u; i < scene.counts.y; ++i) {
@@ -129,8 +134,11 @@ void main() {
 		float t = clamp((cos_angle - light.cone.y) / max(light.cone.x - light.cone.y, 1e-4), 0.0, 1.0);
 		float edge = t * t * (3.0 - 2.0 * t);
 
-		color += blinnPhong(N, V, L, light.radiance.rgb * (edge / distance_squared), albedo);
+		color += blinnPhong(N, V, L, light.radiance.rgb * (edge / distance_squared), albedo, specular_color);
 	}
+
+	// Свечение прибавляется к уже посчитанному цвету: оно не зависит от света и видно в темноте.
+	color += texture(emissive_map, in_uv).rgb * object.texture_params.z;
 
 	out_color = vec4(color, 1.0);
 }

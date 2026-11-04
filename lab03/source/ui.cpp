@@ -156,9 +156,16 @@ void drawMaterialSection(scene::Material& material, const char* title, std::span
 	}
 
 	drawTextureCombo("Texture", material.texture, materials);
+	if (!materials.empty()) {
+		const MaterialEntry& entry = materials[material.texture];
+		ImGui::TextDisabled("Specular map: %s, emissive map: %s", entry.has_specular ? "yes" : "no (black)",
+		                    entry.has_emissive ? "yes" : "no (black)");
+	}
+
 	ImGui::ColorEdit3("Tint", &material.albedo.x);
 	ImGui::ColorEdit3("Specular color", &material.specular_color.x);
 	ImGui::SliderFloat("Shininess", &material.shininess, 1.0f, 256.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+	ImGui::SliderFloat("Emissive strength", &material.emissive_strength, 0.0f, 4.0f, "%.2f");
 }
 
 void drawSamplingSection(scene::Object& object) {
