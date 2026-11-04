@@ -55,6 +55,7 @@ struct Material {
 	glm::vec3 albedo = glm::vec3(1.0f);         // оттенок: множитель цвета текстуры (белый не меняет её)
 	glm::vec3 specular_color = glm::vec3(1.0f); // цвет блика
 	float shininess = 32.0f;                    // коэффициент блика: чем больше, тем меньше и резче блик
+	int texture = 0;                            // номер материала (набора текстур) в списке, который собирает приложение
 };
 
 struct Object {
@@ -124,6 +125,7 @@ struct Scene {
 	int selected_point = 0;
 	std::vector<SpotLight> spot_lights;
 	int selected_spot = 0;
+	int material_count = 1;         // сколько материалов можно выбрать; новые объекты получают их по очереди
 	bool show_light_markers = true; // яркие кубы на месте точечных и прожекторных источников
 	bool show_spot_cones = true;    // конус и ось прожектора белыми линиями
 };
@@ -156,8 +158,8 @@ glm::mat4 projectionMatrix(const Camera& camera, float aspect);
 
 glm::mat4 floorMatrix(const Floor& floor);
 
-// Новый объект стартует в своей точке траектории и получает свой оттенок.
-Object makeObject(int index);
+// Новый объект стартует в своей точке траектории и получает следующий по порядку материал.
+Object makeObject(int index, int material_count = 1);
 void addObject(Scene& scene);
 void removeSelected(Scene& scene);
 

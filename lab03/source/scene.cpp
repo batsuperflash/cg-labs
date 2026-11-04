@@ -112,9 +112,10 @@ glm::mat4 floorMatrix(const Floor& floor) {
 	       transform::scale(glm::vec3(floor.half_size, 1.0f, floor.half_size));
 }
 
-Object makeObject(int index) {
+Object makeObject(int index, int material_count) {
 	Object object;
 	object.animation.offset = two_pi * float(index) / float(max_objects);
+	object.material.texture = index % std::max(material_count, 1);
 	return object;
 }
 
@@ -123,7 +124,7 @@ void addObject(Scene& scene) {
 		return;
 	}
 
-	scene.objects[scene.object_count] = makeObject(scene.object_count);
+	scene.objects[scene.object_count] = makeObject(scene.object_count, scene.material_count);
 	scene.selected = scene.object_count;
 	++scene.object_count;
 }

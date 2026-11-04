@@ -129,6 +129,7 @@ target_sources(${PROJECT_NAME} PRIVATE
 	source/graphics.cpp
 	source/geometry.cpp
 	source/image.cpp
+	source/materials.cpp
 	source/scene.cpp
 	source/transform.cpp
 	source/ui.cpp
@@ -140,7 +141,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE third_party/stb)
 
 # Tests for matrices, geometry, scene logic and image loading: no window and no Vulkan required
-add_executable(lab_tests tests/lab_tests.cpp source/geometry.cpp source/image.cpp source/scene.cpp source/transform.cpp)
+add_executable(lab_tests tests/lab_tests.cpp source/geometry.cpp source/image.cpp source/materials.cpp source/scene.cpp source/transform.cpp)
 set_target_properties(lab_tests PROPERTIES CXX_STANDARD_REQUIRED TRUE CXX_STANDARD 20)
 target_include_directories(lab_tests PRIVATE source)
 target_include_directories(lab_tests SYSTEM PRIVATE third_party/stb)

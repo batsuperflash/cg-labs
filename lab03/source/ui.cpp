@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <span>
 #include <vector>
 
 #include <imgui.h>
@@ -10,29 +11,25 @@ namespace ui {
 
 namespace {
 
-void drawObjectsSection(scene::Scene& scene) {
+void drawObjectsSection(scene::Scene& scene, std::span<const MaterialEntry> materials) {
 	if (!ImGui::CollapsingHeader("Objects", ImGuiTreeNodeFlags_DefaultOpen)) {
 		return;
 	}
 
-	// Выпадающий список занимает одну строку, поэтому окно не растёт с числом объектов.
-	auto drawSwatch = [](const glm::vec3& color) {
-		const float size = ImGui::GetFrameHeight();
-		ImGui::ColorButton("##swatch", ImVec4(color.r, color.g, color.b, 1.0f), ImGuiColorEditFlags_NoTooltip,
-		                   ImVec2(size, size));
-		ImGui::SameLine();
+	// Выпадающий список занимает одну строку, поэтому окно не растёт с числом объектов. Рядом с номером написано название текстуры.
+	auto describe = [&](int i, char* text, size_t size) {
+		const int texture = std::clamp(scene.objects[i].material.texture, 0, std::max(int(materials.size()) - 1, 0));
+		std::snprintf(text, size, "Object %d: %s", i + 1, materials.empty() ? "-" : materials[texture].name.c_str());
 	};
 
-	char preview[32];
-	std::snprintf(preview, sizeof(preview), "Object %d", scene.selected + 1);
-	drawSwatch(scene.objects[scene.selected].material.albedo);
+	char preview[64];
+	describe(scene.selected, preview, sizeof(preview));
 	if (ImGui::BeginCombo("Selected", preview)) {
 		for (int i = 0; i < scene.object_count; ++i) {
-			char label[32];
-			std::snprintf(label, sizeof(label), "Object %d", i + 1);
+			char label[64];
+			describe(i, label, sizeof(label));
 
 			ImGui::PushID(i);
-			drawSwatch(scene.objects[i].material.albedo);
 			if (ImGui::Selectable(label, scene.selected == i)) {
 				scene.selected = i;
 			}
@@ -134,11 +131,31 @@ void drawAnimationSection(scene::Animation& animation) {
 	ImGui::TextDisabled("p(t) = R (sin(a t + shift), sin(b t), sin(c t))");
 }
 
-void drawMaterialSection(scene::Material& material, const char* title) {
+// Выпадающий список материалов: название выбранного в строке, остальные в списке.
+void drawTextureCombo(const char* label, int& index, std::span<const MaterialEntry> materials) {
+	if (materials.empty()) {
+		return;
+	}
+
+	index = std::clamp(index, 0, int(materials.size()) - 1);
+	if (ImGui::BeginCombo(label, materials[index].name.c_str())) {
+		for (int i = 0; i < int(materials.size()); ++i) {
+			ImGui::PushID(i);
+			if (ImGui::Selectable(materials[i].name.c_str(), index == i)) {
+				index = i;
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndCombo();
+	}
+}
+
+void drawMaterialSection(scene::Material& material, const char* title, std::span<const MaterialEntry> materials) {
 	if (!ImGui::CollapsingHeader(title, ImGuiTreeNodeFlags_DefaultOpen)) {
 		return;
 	}
 
+	drawTextureCombo("Texture", material.texture, materials);
 	ImGui::ColorEdit3("Tint", &material.albedo.x);
 	ImGui::ColorEdit3("Specular color", &material.specular_color.x);
 	ImGui::SliderFloat("Shininess", &material.shininess, 1.0f, 256.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
@@ -268,7 +285,7 @@ void drawVisualizationSection(scene::Scene& scene) {
 	ImGui::TextDisabled("Markers are cubes in the color of the light, unlit");
 }
 
-void drawFloorSection(scene::Floor& floor) {
+void drawFloorSection(scene::Floor& floor, std::span<const MaterialEntry> materials) {
 	if (!ImGui::CollapsingHeader("Floor")) {
 		return;
 	}
@@ -276,12 +293,12 @@ void drawFloorSection(scene::Floor& floor) {
 	ImGui::Checkbox("Show floor", &floor.visible);
 	ImGui::SliderFloat("Floor height", &floor.height, -10.0f, 0.0f, "%.1f");
 	ImGui::SliderFloat("Texture tiling", &floor.tiling, 1.0f, 20.0f, "%.1f");
-	drawMaterialSection(floor.material, "Floor material");
+	drawMaterialSection(floor.material, "Floor material", materials);
 }
 
 } // namespace
 
-void drawSceneWindow(scene::Scene& scene) {
+void drawSceneWindow(scene::Scene& scene, std::span<const MaterialEntry> materials) {
 	ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(ImVec2(420.0f, 660.0f), ImGuiCond_FirstUseEver);
 	ImGui::Begin("Lab 3: texturing");
@@ -293,8 +310,8 @@ void drawSceneWindow(scene::Scene& scene) {
 	drawPointLightsSection(scene);
 	drawSpotLightsSection(scene);
 	drawVisualizationSection(scene);
-	drawFloorSection(scene.floor);
-	drawObjectsSection(scene);
+	drawFloorSection(scene.floor, materials);
+	drawObjectsSection(scene, materials);
 
 	// Разделы ниже меняют только выбранный объект.
 	char title[32];
@@ -302,7 +319,7 @@ void drawSceneWindow(scene::Scene& scene) {
 	ImGui::SeparatorText(title);
 
 	scene::Object& object = scene.objects[scene.selected];
-	drawMaterialSection(object.material, "Material");
+	drawMaterialSection(object.material, "Material", materials);
 	drawTransformSection(object.transform);
 	drawAnimationSection(object.animation);
 

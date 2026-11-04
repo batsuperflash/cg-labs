@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -19,6 +21,7 @@
 #include "geometry.hpp"
 #include "graphics.hpp"
 #include "image.hpp"
+#include "materials.hpp"
 #include "scene.hpp"
 #include "ui.hpp"
 
@@ -80,6 +83,16 @@ struct MeshGpu {
 	uint32_t index_count;
 };
 
+// Материал: набор текстур с собственным набором дескрипторов. Так материалы переключаются одной командой привязки.
+struct MaterialGpu {
+	std::string name;
+	graphics::Texture albedo;
+	VkDescriptorSet descriptor_set;
+};
+
+// Сколько материалов можно загрузить, считая встроенный «plain».
+constexpr uint32_t max_materials = 32;
+
 // Сколько моделей можно нарисовать за кадр: объекты, пол, значки всех источников и конусы прожекторов.
 constexpr uint32_t max_draws = scene::max_objects + 1 + scene::max_point_lights + 2 * scene::max_spot_lights;
 
@@ -96,16 +109,19 @@ graphics::Buffer spot_lights_buffer;
 
 VkDescriptorSetLayout vk_scene_set_layout;
 VkDescriptorSetLayout vk_model_set_layout;
+VkDescriptorSetLayout vk_material_set_layout;
 VkPipelineLayout vk_pipeline_layout;
 VkPipeline vk_pipeline;      // освещаемые модели по Блинну-Фонгу
 VkPipeline vk_flat_pipeline; // значки источников: треугольники одного цвета
 VkPipeline vk_line_pipeline; // конусы прожекторов: линии одного цвета
 VkDescriptorPool vk_descriptor_pool;
 VkDescriptorSet vk_scene_set;
-VkDescriptorSet vk_model_set; // динамический uniform buffer с моделями и текстура
+VkDescriptorSet vk_model_set; // динамический uniform buffer со всеми моделями
 
-graphics::Texture albedo_texture;
 VkSampler vk_sampler;
+graphics::Texture white_texture;           // служебная текстура из одного белого пикселя: цвет «plain» целиком из оттенка
+std::vector<MaterialGpu> materials_gpu;    // materials_gpu[0] — «plain», дальше материалы из папки textures
+std::vector<ui::MaterialEntry> material_entries;
 
 scene::Scene world = scene::makeDefaultScene();
 double previous_time = -1.0;
@@ -211,6 +227,58 @@ bool allocateDescriptorSet(VkDescriptorSetLayout layout, VkDescriptorSet& set) {
 	return true;
 }
 
+// Создаёт материалы: встроенный «plain» с белой текстурой, затем по одному на каждый файл *_albedo.* из папки textures.
+// Файл, который не удалось прочитать, пропускается вместе с материалом.
+bool createMaterials() {
+	const image::Image white = image::solid(255, 255, 255);
+	if (!graphics::createTexture(white.pixels.data(), white.width, white.height, VK_FORMAT_R8G8B8A8_SRGB, white_texture)) {
+		return false;
+	}
+
+	auto addMaterial = [](const std::string& name, graphics::Texture albedo, const graphics::Texture& shown) {
+		MaterialGpu material = { name, albedo, VK_NULL_HANDLE };
+		if (!allocateDescriptorSet(vk_material_set_layout, material.descriptor_set)) {
+			graphics::destroyTexture(material.albedo);
+			return false;
+		}
+		writeImageDescriptor(material.descriptor_set, 0, shown.view, vk_sampler);
+		materials_gpu.push_back(material);
+		material_entries.push_back({ name });
+		return true;
+	};
+
+	if (!addMaterial("plain", {}, white_texture)) {
+		return false;
+	}
+
+	for (const materials::Files& files : materials::discover("textures")) {
+		if (materials_gpu.size() >= max_materials) {
+			std::cerr << "Too many materials, skipping " << files.name << '\n';
+			break;
+		}
+
+		graphics::Texture albedo;
+		if (!loadTexture(files.albedo.string().c_str(), VK_FORMAT_R8G8B8A8_SRGB, albedo)) {
+			continue;
+		}
+		if (!addMaterial(files.name, albedo, albedo)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// Номер материала по имени; если такого нет, 0 («plain»).
+int findMaterial(const char* name) {
+	for (size_t i = 0; i < materials_gpu.size(); ++i) {
+		if (materials_gpu[i].name == name) {
+			return int(i);
+		}
+	}
+	return 0;
+}
+
 bool createResources() {
 	auto& context = graphics::internal::context;
 
@@ -243,8 +311,8 @@ bool createResources() {
 		},
 	};
 
-	// Набор для моделей: слот 0 — динамический uniform buffer с ModelUniforms (смещение задаётся при привязке набора),
-	// слот 1 — текстура вместе с сэмплером. Набор один на все модели.
+	// Набор для моделей: слот 0 — динамический uniform buffer с ModelUniforms. Смещение к данным нужной модели
+	// задаётся при привязке набора. Набор один на все модели.
 	const VkDescriptorSetLayoutBinding model_bindings[] = {
 		{
 			.binding = 0,
@@ -252,8 +320,12 @@ bool createResources() {
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		},
+	};
+
+	// Набор для материала: слот 0 — текстура альбедо вместе с сэмплером. Свой набор у каждого материала.
+	const VkDescriptorSetLayoutBinding material_bindings[] = {
 		{
-			.binding = 1,
+			.binding = 0,
 			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 			.descriptorCount = 1,
 			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -272,16 +344,24 @@ bool createResources() {
 		.pBindings = model_bindings,
 	};
 
+	const VkDescriptorSetLayoutCreateInfo material_set_layout = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = sizeof(material_bindings) / sizeof(material_bindings[0]),
+		.pBindings = material_bindings,
+	};
+
 	if (vkCreateDescriptorSetLayout(context.device, &scene_set_layout, nullptr,
 	                                &vk_scene_set_layout) != VK_SUCCESS ||
 	    vkCreateDescriptorSetLayout(context.device, &model_set_layout, nullptr,
-	                                &vk_model_set_layout) != VK_SUCCESS) {
+	                                &vk_model_set_layout) != VK_SUCCESS ||
+	    vkCreateDescriptorSetLayout(context.device, &material_set_layout, nullptr,
+	                                &vk_material_set_layout) != VK_SUCCESS) {
 		std::cerr << "Failed to create Vulkan descriptor set layouts\n";
 		return false;
 	}
 
 	// Номер набора в шейдере (set = 0 или 1) — это позиция его layout в этом массиве.
-	const VkDescriptorSetLayout set_layouts[] = { vk_scene_set_layout, vk_model_set_layout };
+	const VkDescriptorSetLayout set_layouts[] = { vk_scene_set_layout, vk_model_set_layout, vk_material_set_layout };
 
 	const VkPipelineLayoutCreateInfo pipeline_layout = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -352,17 +432,18 @@ bool createResources() {
 		return false;
 	}
 
-	// Два набора: сцена (uniform buffer и два storage buffers) и модели (динамический uniform buffer и текстура).
+	// Набор сцены (uniform buffer и два storage buffers), набор моделей (динамический uniform buffer)
+	// и по набору на каждый материал (текстура с сэмплером).
 	const VkDescriptorPoolSize descriptor_pool_sizes[] = {
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1 },
 		{ .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, .descriptorCount = 1 },
 		{ .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 2 },
-		{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1 },
+		{ .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = max_materials },
 	};
 
 	const VkDescriptorPoolCreateInfo descriptor_pool = {
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = 2,
+		.maxSets = 2 + max_materials,
 		.poolSizeCount = sizeof(descriptor_pool_sizes) / sizeof(descriptor_pool_sizes[0]),
 		.pPoolSizes = descriptor_pool_sizes,
 	};
@@ -396,16 +477,14 @@ bool createResources() {
 	vk_sampler = graphics::createSampler();
 	if (vk_sampler == VK_NULL_HANDLE ||
 	    !graphics::createBuffer(max_draws * model_stride, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, model_uniforms) ||
-	    !loadTexture("textures/brick_albedo.png", VK_FORMAT_R8G8B8A8_SRGB, albedo_texture) ||
 	    !allocateDescriptorSet(vk_model_set_layout, vk_model_set)) {
 		return false;
 	}
 
 	// Для динамического буфера range — размер одного окна чтения: шейдер видит ModelUniforms по смещению из команды привязки.
 	writeBufferDescriptor(vk_model_set, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, model_uniforms, sizeof(ModelUniforms));
-	writeImageDescriptor(vk_model_set, 1, albedo_texture.view, vk_sampler);
 
-	return true;
+	return createMaterials();
 }
 
 } // namespace
@@ -417,6 +496,13 @@ bool initialize() {
 		shutdown();
 		return false;
 	}
+
+	// Материалы известны только теперь, поэтому начальные текстуры назначаются здесь, по именам.
+	world.material_count = int(materials_gpu.size());
+	world.objects[0].material.texture = findMaterial("brick");
+	world.objects[1].material.texture = findMaterial("marble");
+	world.objects[2].material.texture = findMaterial("wood");
+	world.floor.material.texture = findMaterial("tiles");
 	return true;
 }
 
@@ -424,7 +510,10 @@ void shutdown() {
 	auto& context = graphics::internal::context;
 	vkQueueWaitIdle(context.graphics_queue);
 
-	graphics::destroyTexture(albedo_texture);
+	for (MaterialGpu& material : materials_gpu) {
+		graphics::destroyTexture(material.albedo);
+	}
+	graphics::destroyTexture(white_texture);
 	vkDestroySampler(context.device, vk_sampler, nullptr);
 	graphics::destroyBuffer(model_uniforms);
 	graphics::destroyBuffer(spot_lights_buffer);
@@ -435,6 +524,7 @@ void shutdown() {
 	vkDestroyPipeline(context.device, vk_flat_pipeline, nullptr);
 	vkDestroyPipeline(context.device, vk_pipeline, nullptr);
 	vkDestroyPipelineLayout(context.device, vk_pipeline_layout, nullptr);
+	vkDestroyDescriptorSetLayout(context.device, vk_material_set_layout, nullptr);
 	vkDestroyDescriptorSetLayout(context.device, vk_model_set_layout, nullptr);
 	vkDestroyDescriptorSetLayout(context.device, vk_scene_set_layout, nullptr);
 	destroyMesh(cone_mesh);
@@ -485,7 +575,7 @@ void update(double time) {
 		scene::advance(world.objects[i].animation, dt);
 	}
 
-	ui::drawSceneWindow(world);
+	ui::drawSceneWindow(world, material_entries);
 
 	if (exit_after_frames != 0 && ++frame_count >= exit_after_frames) {
 		auto* window = static_cast<GLFWwindow*>(ImGui::GetMainViewport()->PlatformHandle);
@@ -555,7 +645,8 @@ ModelUniforms makeModelUniforms(const glm::mat4& model, const glm::mat4& normal_
 // Записывает команды для одного рисования. Данные модели пишутся в свой элемент динамического буфера,
 // а при привязке единственного набора дескрипторов задаётся смещение к этому элементу.
 // prepare() уже дождался завершения предыдущего кадра, поэтому буфер можно перезаписывать.
-void drawModel(VkCommandBuffer command_buffer, uint32_t& next_slot, const MeshGpu& mesh, const ModelUniforms& uniforms) {
+void drawModel(VkCommandBuffer command_buffer, uint32_t& next_slot, const MeshGpu& mesh, const ModelUniforms& uniforms,
+               int material = 0) {
 	const uint32_t dynamic_offset = uint32_t(next_slot++ * model_stride);
 	graphics::writeBuffer(model_uniforms, &uniforms, sizeof(uniforms), dynamic_offset);
 
@@ -563,9 +654,12 @@ void drawModel(VkCommandBuffer command_buffer, uint32_t& next_slot, const MeshGp
 	vkCmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertices.buffer, &vertex_offset);
 	vkCmdBindIndexBuffer(command_buffer, mesh.indices.buffer, 0, VK_INDEX_TYPE_UINT16);
 
-	// firstSet = 1: набор моделей подставляется на место set = 1 в шейдере, набор сцены (set = 0) остаётся.
+	// firstSet = 1: наборы моделей (set = 1) и материала (set = 2) подставляются за набором сцены (set = 0), который остаётся.
+	// Динамическое смещение одно: оно относится к динамическому uniform buffer в наборе моделей.
+	const size_t material_index = size_t(std::clamp(material, 0, int(materials_gpu.size()) - 1));
+	const VkDescriptorSet sets[] = { vk_model_set, materials_gpu[material_index].descriptor_set };
 	vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk_pipeline_layout,
-	                        1, 1, &vk_model_set, 1, &dynamic_offset);
+	                        1, 2, sets, 1, &dynamic_offset);
 	vkCmdDrawIndexed(command_buffer, mesh.index_count, 1, 0, 0, 0);
 }
 
@@ -630,14 +724,16 @@ void render(const graphics::internal::FrameData& fd) {
 	for (int i = 0; i < world.object_count; ++i) {
 		const scene::Object& object = world.objects[i];
 		drawModel(fd.command_buffer, next_slot, dodecahedron_mesh,
-		          makeModelUniforms(scene::modelMatrix(object), scene::normalMatrix(object), object.material));
+		          makeModelUniforms(scene::modelMatrix(object), scene::normalMatrix(object), object.material),
+		          object.material.texture);
 	}
 
 	if (world.floor.visible) {
 		// Нормаль пола всегда смотрит вверх, поэтому матрица для нормалей единичная.
 		drawModel(fd.command_buffer, next_slot, plane_mesh,
 		          makeModelUniforms(scene::floorMatrix(world.floor), glm::mat4(1.0f), world.floor.material,
-		                                  glm::vec2(world.floor.tiling)));
+		                                  glm::vec2(world.floor.tiling)),
+		          world.floor.material.texture);
 	}
 
 	// Значки источников не освещаются: другой конвейер выводит цвет источника как есть.

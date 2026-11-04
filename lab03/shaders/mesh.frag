@@ -19,8 +19,8 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	vec4 texture_params;
 } object;
 
-// Текстура альбедо лежит в том же наборе дескрипторов, что и динамический uniform buffer модели.
-layout(set = 1, binding = 1) uniform sampler2D albedo_map;
+// Текстуры материала: у каждого материала свой набор дескрипторов (set = 2), он выбирается при рисовании модели.
+layout(set = 2, binding = 0) uniform sampler2D albedo_map;
 
 // Массивы источников лежат в storage buffer, поэтому размер массива в шейдере не задан:
 // сколько источников, говорит scene.counts.

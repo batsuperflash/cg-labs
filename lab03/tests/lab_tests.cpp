@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <numbers>
 #include <utility>
@@ -15,6 +17,7 @@
 
 #include "geometry.hpp"
 #include "image.hpp"
+#include "materials.hpp"
 #include "scene.hpp"
 #include "transform.hpp"
 
@@ -401,6 +404,54 @@ void testImages() {
 	check(!image::load("textures/does_not_exist.png", missing), "loading a missing file fails");
 }
 
+void testMaterials() {
+	// Материалы ищутся по суффиксу _albedo; порядок файлов в папке на результат не влияет.
+	const std::filesystem::path directory = std::filesystem::temp_directory_path() / "lab03_materials_test";
+	std::filesystem::remove_all(directory);
+	std::filesystem::create_directories(directory);
+	for (const char* name : { "wood_albedo.png", "brick_albedo.jpg", "notes.txt", "stray_specular.png", "_albedo.png" }) {
+		std::ofstream(directory / name).put('x');
+	}
+
+	const std::vector<materials::Files> found = materials::discover(directory);
+	check(found.size() == 2, "only files with the _albedo suffix and a name make a material");
+	if (found.size() == 2) {
+		check(found[0].name == "brick" && found[1].name == "wood", "materials are sorted by name");
+		check(found[0].albedo.filename() == "brick_albedo.jpg", "any image extension is accepted");
+	}
+	std::filesystem::remove_all(directory);
+
+	check(materials::discover(directory / "missing").empty(), "a missing folder gives no materials");
+
+	// Материалы, которые лежат в репозитории.
+	const std::vector<materials::Files> shipped = materials::discover("textures");
+	check(shipped.size() >= 2, "the repository ships several textures");
+	for (const materials::Files& files : shipped) {
+		image::Image albedo;
+		check(image::load(files.albedo, albedo) && albedo.width > 0, "every shipped albedo texture loads");
+	}
+}
+
+void testMaterialAssignment() {
+	scene::Scene state;
+	state.material_count = 3;
+	for (int i = 0; i < 4; ++i) {
+		scene::addObject(state);
+	}
+	check(state.objects[1].material.texture == 1 && state.objects[2].material.texture == 2 &&
+	      state.objects[3].material.texture == 0, "new objects take materials in turn and wrap around");
+
+	for (int i = 0; i < state.object_count; ++i) {
+		check(state.objects[i].material.texture >= 0 && state.objects[i].material.texture < state.material_count,
+		      "object material is inside the list");
+	}
+
+	scene::Scene empty;
+	empty.material_count = 0;
+	scene::addObject(empty);
+	check(empty.objects[1].material.texture == 0, "without materials every object uses the first one");
+}
+
 void testNormalMatrix() {
 	scene::Object object;
 	object.animation.trajectory.radius = 0.0f;
@@ -555,6 +606,8 @@ int main() {
 	testCubeAndCone();
 	testTextureCoordinates();
 	testImages();
+	testMaterials();
+	testMaterialAssignment();
 	testLightVisualization();
 	testNormalMatrix();
 	testCamera();
