@@ -174,7 +174,7 @@ void drawSamplingSection(scene::Object& object) {
 	}
 
 	ImGui::Checkbox("Animated sampling", &object.animated_sampling);
-	ImGui::TextDisabled("Three samples of the texture with moving coordinates, hue shifts over time");
+	ImGui::TextDisabled("Three moving samples, hue shifts over time");
 }
 
 void drawLightingSection(scene::Scene& scene) {
