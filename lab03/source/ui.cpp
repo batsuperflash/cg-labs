@@ -155,6 +155,8 @@ void drawMaterialSection(scene::Material& material, const char* title, std::span
 		return;
 	}
 
+	// Раздел рисуется для пола и для объекта, поэтому подписи элементов нужно развести по заголовку.
+	ImGui::PushID(title);
 	drawTextureCombo("Texture", material.texture, materials);
 	if (!materials.empty()) {
 		const MaterialEntry& entry = materials[material.texture];
@@ -166,6 +168,7 @@ void drawMaterialSection(scene::Material& material, const char* title, std::span
 	ImGui::ColorEdit3("Specular color", &material.specular_color.x);
 	ImGui::SliderFloat("Shininess", &material.shininess, 1.0f, 256.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 	ImGui::SliderFloat("Emissive strength", &material.emissive_strength, 0.0f, 4.0f, "%.2f");
+	ImGui::PopID();
 }
 
 void drawSamplingSection(scene::Object& object) {
